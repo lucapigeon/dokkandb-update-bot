@@ -583,8 +583,9 @@ def main() -> int:
                                 stage_word = "nuovo stage" if len(added_stages) == 1 else "nuovi stage"
                                 numbers = ", ".join(str(n) for n in added_stages)
                                 message = f"{stage_word}: Quest, area {quest['area']}, stage {numbers}"
-                                alerts.append((f"DokkanDB {region} update: Quest", [f"• {message} — {link(f'area {quest['area']}', quest['url'])}"]))
-
+                                area_label = f"area {quest['area']}"
+                                alerts.append((f"DokkanDB {region} update: Quest", [f"• {message} — {link(area_label, quest['url'])}"]))
+                                
                     selected_keys: list[str] = []
                     if full_event_scan: selected_keys = [k for k, _, _ in EVENT_CATEGORIES]
                     else:
