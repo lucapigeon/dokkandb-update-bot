@@ -25,14 +25,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install playwright requests
+          pip install playwright requests cryptography
           playwright install --with-deps chromium
 
       - name: Esegui monitor.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python monitor.py
+        run: |
+          if [ "${{ github.event.inputs.test_telegram }}" == "true" ]; then
+            python monitor.py --test-telegram
+          else
+            python monitor.py
+          fi
 
       - name: Salva Screenshot in caso di errore
         if: failure()
