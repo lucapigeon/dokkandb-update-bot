@@ -1,0 +1,19 @@
+name: Cron smoke test
+
+on:
+  schedule:
+    - cron: "2/5 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  http-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check example.com responds
+        run: >-
+          curl --fail --silent --show-error --location --max-time 20
+          --output /dev/null --write-out "HTTP %{http_code} from example.com\n"
+          https://example.com/
