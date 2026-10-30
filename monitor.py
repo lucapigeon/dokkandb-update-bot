@@ -40,10 +40,10 @@ EVENT_CATEGORIES = [
 TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
 ROME = ZoneInfo("Europe/Rome")
 BASE_CRON = "1,31 * * * *"
-GLB_CARD_CRONS = {"30/5 2 * * *", "0,5,10,15,20,25,30 3 * * *"}
-JP_CARD_CRONS = {"30,35,40,45,50,55 6 * * *", "0,5,10,15,20,25,30 7 * * *"}
-GLB_EVENT_SCAN_CRON = "30 15 * * *"
-JP_EVENT_SCAN_CRON = "30 19 * * *"
+JP_CARD_CRONS = {"30/5 2 * * *", "0,5,10,15,20,25,30 3 * * *"}
+GLB_CARD_CRONS = {"30,35,40,45,50,55 6 * * *", "0,5,10,15,20,25,30 7 * * *"}
+JP_EVENT_SCAN_CRON = "30 15 * * *"
+GLB_EVENT_SCAN_CRON = "30 19 * * *"
 
 
 def plain(text: str) -> str:
@@ -403,6 +403,7 @@ def sync_telegram_subscribers(state: dict) -> tuple[set[str], set[str], set[str]
             json.dumps(sorted(subscribers)).encode("utf-8")
         ).decode("ascii")
     state["telegram_update_offset"] = next_offset
+    print(f"Telegram: {len(updates)} aggiornamenti ricevuti; {len(added)} nuove iscrizioni e {len(removed)} rimozioni.")
     return subscribers, added, removed
 
 
