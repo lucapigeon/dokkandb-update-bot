@@ -236,38 +236,31 @@ def extract_events(page, region: str, path: str) -> list[dict[str, str]]:
     return result
 
 def quest_area(page, region: str, area_number: int) -> dict[str, object] | None:
-    response = page.goto(urljoin(BASE, f"/events/quests/{area_number}"), wait_until="domcontentloaded", timeout=60_000)
-    if response is not None and response.status >= 400:
-        return None
     try:
-        selector = page.get_by_role("button", name=region, exact=True)
-        selector.wait_for(state="visible", timeout=8_000)
-        selector.click()
-    except Exception:
-        try:
-            selector = page.locator(f'text="{region}"').first
-            selector.wait_for(state="visible", timeout=8_000)
-            selector.click()
-        except Exception:
+        response = page.goto(urljoin(BASE, f"/events/quests/{area_number}"), wait_until="domcontentloaded", timeout=30_000)
+        if response is not None and response.status >= 400:
             return None
-            
-    page.wait_for_timeout(1_200)
-    stage_ids = page.locator('a[href*="/events/quests/"]').evaluate_all(
-        """els => { const ids=new Set(); for(const a of els){
-          const m=(a.getAttribute('href')||'').match(/^\\/events\\/quests\\/(\\d+)\\/(\\d+)$/);
-          if(m) ids.add(m[2]);
-        } return [...ids]; }"""
-    )
-    stages = sorted({int(stage_id) % 1000 // 10 for stage_id in stage_ids})
-    if not stages:
+        switch_region(page, f"/events/quests/{area_number}", region)
+        stage_ids = page.locator('a[href*="/events/quests/"]').evaluate_all(
+            """els => { const ids=new Set(); for(const a of els){
+              const m=(a.getAttribute('href')||'').match(/^\\/events\\/quests\\/(\\d+)\\/(\\d+)$/);
+              if(m) ids.add(m[2]);
+            } return [...ids]; }"""
+        )
+        stages = sorted({int(stage_id) % 1000 // 10 for stage_id in stage_ids})
+        if not stages:
+            return None
+        return {"area": area_number, "url": urljoin(BASE, f"/events/quests/{area_number}"), "stages": stages}
+    except Exception as exc:
+        print(f"Avviso: lettura quest area {area_number} fallita per {region}: {exc}", file=sys.stderr)
         return None
-    return {"area": area_number, "url": urljoin(BASE, f"/events/quests/{area_number}"), "stages": stages}
-
+        
 def inspect_quests(page, region: str, previous: dict | None) -> tuple[dict[str, object] | None, list[int]]:
     current_area = int(previous.get("area", 42)) if previous else 42
     current = quest_area(page, region, current_area)
     if current is None:
-        raise RuntimeError(f"Non riesco a leggere l'area Quest {current_area} per {region}")
+        print(f"Avviso: Area Quest {current_area} non disponibile per {region}. Salto il controllo quest.")
+        return previous, []
     candidate = quest_area(page, region, current_area + 1)
     if candidate is not None:
         promoted = candidate
