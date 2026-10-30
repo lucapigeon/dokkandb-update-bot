@@ -39,7 +39,7 @@ EVENT_CATEGORIES = [
 ]
 TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
 ROME = ZoneInfo("Europe/Rome")
-BASE_CRON = "31,1 * * * *"
+BASE_CRON = "7,37 * * * *"
 JP_CARD_CRONS = {"30/5 2 * * *", "0,5,10,15,20,25,30 3 * * *"}
 GLB_CARD_CRONS = {"30,35,40,45,50,55 6 * * *", "0,5,10,15,20,25,30 7 * * *"}
 JP_EVENT_SCAN_CRON = "30 15 * * *"
@@ -481,8 +481,8 @@ def scheduled_tasks(cron: str, scheduled_at: datetime) -> tuple[set[str], bool, 
     challenge_regions: set[str] = set()
     event_scan_regions: set[str] = set()
     news_due = cron == BASE_CRON
-    summons_due = news_due and scheduled_at.minute == 1
-    # Hourly card checks use the :01 run, except where the five-minute card window covers them.
+    summons_due = news_due and scheduled_at.minute == 7
+    # Hourly card checks use the :07 run, except where the five-minute card window covers them.
     if summons_due:
         minute_of_day = scheduled_at.hour * 60 + scheduled_at.minute
         if not 390 <= minute_of_day <= 450:
