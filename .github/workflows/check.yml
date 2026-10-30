@@ -2,7 +2,7 @@ name: Check DokkanDB
 
 on:
   schedule:
-    - cron: "1,31 * * * *"
+    - cron: "31,1 * * * *"
       timezone: "Europe/Rome"
     - cron: "30/5 2 * * *"
       timezone: "Europe/Rome"
