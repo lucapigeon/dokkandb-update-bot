@@ -60,11 +60,14 @@ jobs:
       - name: Save comparison baseline
         if: always()
         run: |
-          git add state.json
-          if ! git diff --cached --quiet -- state.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "Update DokkanDB monitor baseline"
-            git commit -m "Update DokkanDB monitor baseline"
-            git push
+          if [ -f state.json ]; then
+            git add state.json
+            if ! git diff --cached --quiet -- state.json; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git commit -m "Update DokkanDB monitor baseline"
+              git push
+            fi
+          else
+            echo "state.json non creato; nessuno stato da salvare."
           fi
