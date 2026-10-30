@@ -443,6 +443,14 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
 
 def main() -> int:
+    now = datetime.now(ROME)
+
+    # --- SNIPPET TEMPORANEO DI TEST ---
+    try:
+        telegram_send(f"🤖 Run effettuato alle {now.strftime('%H:%M:%S')}")
+    except Exception as exc:
+        print(f"Errore invio ping temporaneo: {exc}")
+    # ----------------------------------
     if "--test-telegram" in sys.argv[1:]:
         state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
         subscribers, newly_subscribed, newly_unsubscribed = sync_telegram_subscribers(state)
