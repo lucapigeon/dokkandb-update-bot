@@ -401,10 +401,9 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-    if is_manual and "--test-telegram" not in sys.argv:
+    # Se in futuro vuoi forzare manualmente una scansione completa, userai la flag --full
+    if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
-
     ora = now.hour
     # Arrotondiamo il minuto al multiplo di 5 più vicino (GitHub Actions può ritardare di 1-2 minuti)
     minuto = 5 * round(now.minute / 5)
