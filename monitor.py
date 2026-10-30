@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import base64
 import html
+import hashlib
 import json
 import os
 import re
@@ -14,6 +16,7 @@ from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
+from cryptography.fernet import Fernet, InvalidToken
 from playwright.sync_api import sync_playwright
 
 
@@ -306,9 +309,9 @@ def esc(text: str) -> str:
     return html.escape(plain(text), quote=True)
 
 
-def telegram_send(text: str) -> None:
+def telegram_send(text: str, chat_id: str | None = None) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    chat_id = str(chat_id or os.environ["TELEGRAM_CHAT_ID"])
     response = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
         json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
@@ -320,7 +323,90 @@ def telegram_send(text: str) -> None:
         raise RuntimeError(f"Telegram ha rifiutato il messaggio: {result}")
 
 
-def notify(title: str, lines: list[str]) -> None:
+def subscriber_cipher() -> Fernet:
+    token = os.environ["TELEGRAM_BOT_TOKEN"].encode("utf-8")
+    key = base64.urlsafe_b64encode(hashlib.sha256(token).digest())
+    return Fernet(key)
+
+
+def read_subscribers(state: dict) -> set[str]:
+    encrypted = state.get("telegram_chat_ids_enc")
+    if not encrypted:
+        return set()
+    try:
+        values = json.loads(subscriber_cipher().decrypt(encrypted.encode("ascii")).decode("utf-8"))
+        return {str(value) for value in values}
+    except (InvalidToken, ValueError, TypeError) as exc:
+        print(f"Non posso decifrare le chat iscritte (token cambiato o baseline non valida): {exc}", file=sys.stderr)
+        return set()
+
+
+def sync_telegram_subscribers(state: dict) -> tuple[set[str], set[str], set[str]]:
+    """Register private /start chats and groups where the bot was added or removed."""
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    subscribers = read_subscribers(state)
+    configured_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if configured_chat and not state.get("telegram_chat_ids_enc"):
+        subscribers.add(configured_chat)
+
+    offset = int(state.get("telegram_update_offset", 0))
+    response = requests.get(
+        f"https://api.telegram.org/bot{token}/getUpdates",
+        params={"offset": offset, "timeout": 0,
+                "allowed_updates": json.dumps(["message", "my_chat_member"])},
+        timeout=(10, 30),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Telegram getUpdates ha restituito un errore: {payload}")
+
+    added: set[str] = set()
+    removed: set[str] = set()
+    updates = payload.get("result", [])
+    next_offset = offset
+    for update in updates:
+        next_offset = max(next_offset, int(update.get("update_id", 0)) + 1)
+        message = update.get("message", {})
+        chat = message.get("chat", {})
+        text = message.get("text", "")
+        if chat.get("type") == "private" and re.match(r"^/start(?:@[A-Za-z0-9_]+)?(?:\s|$)", text, re.I):
+            chat_id = str(chat.get("id", ""))
+            if chat_id and chat_id not in subscribers:
+                subscribers.add(chat_id)
+                added.add(chat_id)
+        elif chat.get("type") == "private" and re.match(r"^/stop(?:@[A-Za-z0-9_]+)?(?:\s|$)", text, re.I):
+            chat_id = str(chat.get("id", ""))
+            if chat_id and chat_id in subscribers:
+                subscribers.discard(chat_id)
+                removed.add(chat_id)
+
+        membership = update.get("my_chat_member", {})
+        group = membership.get("chat", {})
+        if group.get("type") in {"group", "supergroup", "private"}:
+            chat_id = str(group.get("id", ""))
+            member = membership.get("new_chat_member", {})
+            status = member.get("status", "")
+            is_member = status in {"member", "administrator", "creator"} or (
+                status == "restricted" and member.get("is_member", False)
+            )
+            if chat_id and is_member and chat_id not in subscribers:
+                subscribers.add(chat_id)
+                added.add(chat_id)
+            elif chat_id and not is_member:
+                subscribers.discard(chat_id)
+                added.discard(chat_id)
+                removed.add(chat_id)
+
+    if subscribers != read_subscribers(state):
+        state["telegram_chat_ids_enc"] = subscriber_cipher().encrypt(
+            json.dumps(sorted(subscribers)).encode("utf-8")
+        ).decode("ascii")
+    state["telegram_update_offset"] = next_offset
+    return subscribers, added, removed
+
+
+def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
     # Keep each message below Telegram's 4096-character limit without splitting HTML tags.
     chunks: list[str] = []
     current = f"<b>{esc(title)}</b>"
@@ -331,8 +417,13 @@ def notify(title: str, lines: list[str]) -> None:
         current += "\n" + line
     if current:
         chunks.append(current)
-    for chunk in chunks:
-        telegram_send(chunk)
+    for chat_id in sorted(chat_ids):
+        for chunk in chunks:
+            try:
+                telegram_send(chunk, chat_id)
+            except Exception as exc:
+                print(f"Invio Telegram fallito per chat {chat_id}: {exc}", file=sys.stderr)
+                break
 
 
 def link(label: str, url: str) -> str:
@@ -433,9 +524,30 @@ def main() -> int:
         return 0
 
     state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
+    try:
+        chat_ids, newly_subscribed, newly_unsubscribed = sync_telegram_subscribers(state)
+    except Exception as exc:
+        print(f"Impossibile aggiornare le iscrizioni Telegram; continuo con quelle salvate: {exc}", file=sys.stderr)
+        chat_ids = read_subscribers(state)
+        configured_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+        if configured_chat:
+            chat_ids.add(configured_chat)
+        newly_subscribed = set()
+        newly_unsubscribed = set()
+    for chat_id in sorted(newly_subscribed):
+        try:
+            telegram_send("✅ Iscrizione attiva: riceverai qui gli aggiornamenti DokkanDB.", chat_id)
+        except Exception as exc:
+            print(f"Conferma d'iscrizione non inviata a {chat_id}: {exc}", file=sys.stderr)
+    for chat_id in sorted(newly_unsubscribed):
+        try:
+            telegram_send("Iscrizione disattivata. Per riattivarla invia /start.", chat_id)
+        except Exception as exc:
+            print(f"Conferma di disiscrizione non inviata a {chat_id}: {exc}", file=sys.stderr)
     next_state = {
         key: value for key, value in state.items()
-        if re.match(r"^(?:GLB|JP)\|(?:cards|news|summons|quests|events\|)", key)
+        if key in {"telegram_chat_ids_enc", "telegram_update_offset"}
+        or re.match(r"^(?:GLB|JP)\|(?:cards|news|summons|quests|events\|)", key)
     }
     alerts: list[tuple[str, list[str]]] = []
     errors: list[str] = []
@@ -593,7 +705,7 @@ def main() -> int:
         months = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre")
         stamp = f"{now.day} {months[now.month - 1]} {now.year}, {now:%H:%M}"
         for title, lines in alerts:
-            notify(f"{title} · {stamp}", lines)
+            notify(f"{title} · {stamp}", lines, chat_ids)
     STATE_PATH.write_text(json.dumps(next_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 1 if errors else 0
 
