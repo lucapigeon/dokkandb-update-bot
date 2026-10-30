@@ -39,7 +39,7 @@ EVENT_CATEGORIES = [
 ]
 TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
 ROME = ZoneInfo("Europe/Rome")
-BASE_CRON = "1,31 * * * *"
+BASE_CRON = "31,1 * * * *"
 JP_CARD_CRONS = {"30/5 2 * * *", "0,5,10,15,20,25,30 3 * * *"}
 GLB_CARD_CRONS = {"30,35,40,45,50,55 6 * * *", "0,5,10,15,20,25,30 7 * * *"}
 JP_EVENT_SCAN_CRON = "30 15 * * *"
@@ -485,23 +485,23 @@ def scheduled_tasks(cron: str, scheduled_at: datetime) -> tuple[set[str], bool, 
     # Hourly card checks use the :01 run, except where the five-minute card window covers them.
     if summons_due:
         minute_of_day = scheduled_at.hour * 60 + scheduled_at.minute
-        if not 150 <= minute_of_day <= 210:
-            card_regions.add("GLB")
         if not 390 <= minute_of_day <= 450:
+            card_regions.add("GLB")
+        if not 150 <= minute_of_day <= 210:
             card_regions.add("JP")
     if cron in GLB_CARD_CRONS:
         card_regions.add("GLB")
         minute_of_day = scheduled_at.hour * 60 + scheduled_at.minute
-        if 150 <= minute_of_day <= 210:
+        if 390 <= minute_of_day <= 450:
             challenge_regions.add("GLB")
-        if minute_of_day == 210:
+        if minute_of_day == 450:
             event_scan_regions.add("GLB")
     if cron in JP_CARD_CRONS:
         card_regions.add("JP")
         minute_of_day = scheduled_at.hour * 60 + scheduled_at.minute
-        if 390 <= minute_of_day <= 450:
+        if 150 <= minute_of_day <= 210:
             challenge_regions.add("JP")
-        if minute_of_day == 450:
+        if minute_of_day == 210:
             event_scan_regions.add("JP")
     if cron == GLB_EVENT_SCAN_CRON:
         event_scan_regions.add("GLB")
