@@ -512,8 +512,16 @@ def scheduled_tasks(cron: str, scheduled_at: datetime) -> tuple[set[str], bool, 
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
+        subscribers, newly_subscribed, newly_unsubscribed = sync_telegram_subscribers(state)
+        for chat_id in sorted(newly_subscribed):
+            try:
+                telegram_send("✅ Iscrizione attiva: riceverai qui gli aggiornamenti DokkanDB.", chat_id)
+            except Exception as exc:
+                print(f"Conferma d'iscrizione non inviata a {chat_id}: {exc}", file=sys.stderr)
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         telegram_send("✅ Test DokkanDB Bot: Telegram riceve correttamente i messaggi.")
-        print("Messaggio di test inviato.")
+        print(f"Test Telegram inviato; iscritti attivi: {len(subscribers)}. Nessuna pagina DokkanDB controllata.")
         return 0
 
     now = datetime.now(ROME)
