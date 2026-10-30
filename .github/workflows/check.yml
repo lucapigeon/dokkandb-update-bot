@@ -2,72 +2,53 @@ name: Check DokkanDB
 
 on:
   schedule:
-    - cron: "7,37 * * * *"
-      timezone: "Europe/Rome"
-    - cron: "30/5 2 * * *"
-      timezone: "Europe/Rome"
-    - cron: "0,5,10,15,20,25,30 3 * * *"
-      timezone: "Europe/Rome"
-    - cron: "30,35,40,45,50,55 6 * * *"
-      timezone: "Europe/Rome"
-    - cron: "0,5,10,15,20,25,30 7 * * *"
-      timezone: "Europe/Rome"
-    - cron: "30 15 * * *"
-      timezone: "Europe/Rome"
-    - cron: "30 19 * * *"
-      timezone: "Europe/Rome"
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       test_telegram:
-        description: "Invia un messaggio di prova invece di controllare DokkanDB"
+        description: 'Invia solo un test Telegram'
         required: false
         type: boolean
-        default: false
-
-permissions:
-  contents: write
-
-concurrency:
-  group: dokkandb-check
-  cancel-in-progress: false
 
 jobs:
-  check:
+  monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: '3.10'
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Install Chromium
-        run: python -m playwright install --with-deps chromium
-      - name: Check pages and notify Telegram
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright requests
+          playwright install --with-deps chromium
+
+      - name: Esegui monitor.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SCHEDULE_CRON: ${{ github.event.schedule }}
-        run: |
-          if [ "${{ inputs.test_telegram }}" = "true" ]; then
-            python monitor.py --test-telegram
-          else
-            python monitor.py
-          fi
-      - name: Save comparison baseline
+        run: python monitor.py
+
+      - name: Salva Screenshot in caso di errore
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: error-screenshots
+          path: "*.png"
+          retention-days: 3
+
+      - name: Commit state.json
         if: always()
         run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           if [ -f state.json ]; then
             git add state.json
-            if ! git diff --cached --quiet -- state.json; then
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git commit -m "Update DokkanDB monitor baseline"
-              git push
-            fi
-          else
-            echo "state.json non creato; nessuno stato da salvare."
+            git commit -m "Update state.json" || echo "Nessuna modifica a state.json"
+            git push
           fi
