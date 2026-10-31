@@ -142,24 +142,35 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
 def card_detail(page, href: str, region: str) -> dict[str, str]:
     switch_region(page, href, region)
     data = page.locator("body").evaluate(
-        """body => ({text:body.innerText||'',heads:[...body.querySelectorAll('h1,h2,h3')].map(x=>(x.innerText||'').trim()).filter(Boolean),
+        """body => ({text:body.innerText||'',heads:[...body.querySelectorAll('h1,h2,h3,h4')].map(x=>(x.innerText||'').trim()).filter(Boolean),
         imgs:[...body.querySelectorAll('img')].map(x=>x.getAttribute('src')||'')})"""
     )
     lines = [plain(x) for x in data["text"].splitlines() if plain(x)]
     heads = [plain(x) for x in data["heads"]]
     main = next((x for x in heads if re.search(r"\s+-\s+Card Details$", x, re.I)), "")
     name = re.sub(r"\s+-\s+Card Details$", "", main, flags=re.I)
-    candidates = [x for x in heads if x != main and x.lower() not in {"card details", "card", "stats"}]
-    title = candidates[0] if candidates else ""
+
+    # 1. Cerca il titolo ufficiale tra parentesi quadre [Titolo]
+    title = ""
+    bracket_match = re.search(r"\[([^\]]+)\]", data["text"])
+    if bracket_match:
+        title = plain(bracket_match.group(1))
+
+    # 2. Fallback: filtra tutte le intestazioni di sezione tecniche
+    if not title:
+        ignored_pattern = r"\b(?:card|details|stats|multiplier|skill|skills|categories|links|attack|awakening|eza|seza|same name|similar|leader|passive|super)\b"
+        candidates = [x for x in heads if x != main and not re.search(ignored_pattern, x, re.I)]
+        title = candidates[0] if candidates else ""
+
     img_text = " ".join(data["imgs"])
     rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
     type_code = re.search(r"type[_-]icon[_-]?(1[0-4])", img_text, re.I)
-    card_text = " ".join([title, name, *candidates, *lines[-55:], img_text])
+    card_text = " ".join([title, name, *heads, *lines[-55:], img_text])
     awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
     date = next((line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)), "")
     return {"title": title, "name": name, "rarity": rarity.group(1).upper() if rarity else "",
             "type": TYPE_BY_CODE.get(type_code.group(1), "") if type_code else "", "awakening": awakening, "date": date}
-
+    
 def extract_news(page, region: str) -> list[dict[str, str]]:
     switch_region(page, "/news", region)
     entries = page.locator('a[href^="/news/"]').evaluate_all(
