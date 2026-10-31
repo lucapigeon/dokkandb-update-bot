@@ -74,9 +74,12 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
                   if (cardLinks.length === 1 && root.querySelector('img')) break;
                 }
                 root = root || a;
-                const imgs = [...(root?.querySelectorAll('img') || [] )].map(i => ({src:i.getAttribute('src')||'', alt:i.alt||''}));
-                out.push({href, name:(a.innerText||a.getAttribute('aria-label')||'').trim(),
-                  tile:(root?.innerText||'').trim().slice(0,500), imgs});
+                out.push({
+                  href, 
+                  name: (a.innerText||a.getAttribute('aria-label')||'').trim(),
+                  tile: (root?.innerText||'').trim().slice(0,500), 
+                  html: (root||a).innerHTML
+                });
               }
               return out;
             }"""
@@ -121,14 +124,18 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
     output = []
     for card in cards:
         card_id = re.search(r"/cards/(\d+)", card["href"])[1]
-        image_info = " ".join(f"{i['src']} {i['alt']}" for i in card.get("imgs", []))
-        rarity_match = re.search(r"(?:rare[_-])?(LR|UR|SSR|SR|R|N)(?:\.png|\b)", image_info, re.I)
-        type_match = re.search(r"type[_-]icon[_-]?(1[0-4])", image_info, re.I)
+        html_content = card.get("html", "")
+        
+        # Estrazione solida da CSS o immagini: cerca stringhe come "rare_UR" e "type_10"
+        rarity_match = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", html_content, re.I)
+        type_match = re.search(r"type[_-](?:icon[_-]?)?(1[0-4])\b", html_content, re.I)
+        
         tile = plain(card.get("tile", ""))
         name = plain(card.get("name", "")).split("\n")[0]
         date_match = re.search(r"\b\d{1,2}[ /-][A-Za-z]{3,}[^\n]{0,24}\b\d{1,2}:\d{2}\b", tile)
-        awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", image_info, re.I) else (
-            "EZA" if re.search(r"\bEZA\b", image_info, re.I) else "")
+        awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", html_content, re.I) else (
+            "EZA" if re.search(r"\bEZA\b", html_content, re.I) else "")
+            
         detail = {
             "title": "", "name": name,
             "rarity": rarity_match.group(1).upper() if rarity_match else "",
@@ -138,7 +145,7 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         output.append({"id": card_id, "url": urljoin(BASE, card["href"]), **detail,
                        "name": detail.get("name") or plain(card.get("name")) or f"Card {card_id}"})
     return output
-
+    
 def card_detail(page, href: str, region: str) -> dict[str, str]:
     switch_region(page, href, region)
     data = page.locator("body").evaluate(
