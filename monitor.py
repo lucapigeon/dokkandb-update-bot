@@ -327,7 +327,7 @@ def sync_telegram_subscribers(state: dict) -> tuple[set[str], set[str], set[str]
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     subscribers = read_subscribers(state)
     configured_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if configured_chat and not state.get("telegram_chat_ids_enc"):
+    if configured_chat:
         subscribers.add(configured_chat)
 
     offset = int(state.get("telegram_update_offset", 0))
@@ -417,22 +417,18 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
     if minuto == 0:
         summons_due = True
 
-    # Finestra JP: 02:30 - 03:30
     if (ora == 2 and minuto >= 30) or (ora == 3 and minuto <= 30):
         card_regions.add("JP")
         challenge_regions.add("JP")
     
-    # Finestra GLB: 06:30 - 07:30
     if (ora == 6 and minuto >= 30) or (ora == 7 and minuto <= 30):
         card_regions.add("GLB")
         challenge_regions.add("GLB")
     
-    # Controllo orario fuori finestra
     if minuto == 0:
         card_regions.update(["GLB", "JP"])
         challenge_regions.update(["GLB", "JP"])
 
-    # Eventi/Quest GLB (03:30 e 15:30) e JP (07:30 e 19:30)
     if ora in [3, 15] and minuto == 30:
         event_scan_regions.add("GLB")
     if ora in [7, 19] and minuto == 30:
@@ -447,7 +443,7 @@ def main() -> int:
         for chat_id in sorted(newly_subscribed):
             try:
                 telegram_send("✅ Iscrizione attiva: riceverai qui gli aggiornamenti DokkanDB.", chat_id)
-            except Exception as exc:
+            except Exception:
                 pass
         STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         telegram_send("✅ Test DokkanDB Bot: Telegram riceve correttamente i messaggi.")
@@ -479,7 +475,7 @@ def main() -> int:
         try: telegram_send("Iscrizione disattivata. Per riattivarla invia /start.", chat_id)
         except Exception: pass
 
-    next_state = {k: v for k, v in state.items() if k in {"telegram_chat_ids_enc", "telegram_update_offset"} or re.match(r"^(?:GLB|JP)\|(?:cards|news|summons|quests|events\|)", k)}
+    next_state = {k: v for k, v in state.items() if k in {"telegram_chat_ids_enc", "telegram_update_offset"} or re.match(r"^(?:GLB|JP)\|(?:cards|news|summons|quests|events)", k)}
     alerts: list[tuple[str, list[str]]] = []
     errors: list[str] = []
     active_region = {"value": None}
@@ -517,20 +513,23 @@ def main() -> int:
                         cards = extract_cards(page, region, set(old_cards) if old_cards else None)
                         current_ids = [card["id"] for card in cards]
                         next_state[card_key] = current_ids
-                        if old_cards is None: print(f"Baseline carte creato: {region}")
-                        elif current_ids[:10] != old_cards[:10]:
+                        if old_cards is None:
+                            print(f"Baseline carte creato: {region}")
+                        else:
                             old_set = set(old_cards)
                             added = [c for c in cards if c["id"] not in old_set]
-                            lines = []
-                            for card in added:
-                                detail = card_detail(page, card["href"], region)
-                                name = detail["name"] or card["name"] or f"Card {card['id']}"
-                                attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
-                                prefix = f"{detail['awakening']} " if detail["awakening"] else ""
-                                label = " ".join(v for v in (detail["title"], name) if v)
-                                date = f" — {esc(detail['date'])}" if detail["date"] else ""
-                                lines.append(f"• {esc(prefix + attributes)} {link(label, card['url'])}{date}")
-                            if lines: alerts.append((f"DokkanDB {region} update: nuovi personaggi", lines))
+                            if added:
+                                lines = []
+                                for card in added:
+                                    detail = card_detail(page, card["href"], region)
+                                    name = detail["name"] or card["name"] or f"Card {card['id']}"
+                                    attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
+                                    prefix = f"{detail['awakening']} " if detail["awakening"] else ""
+                                    label = " ".join(v for v in (detail["title"], name) if v)
+                                    date = f" — {esc(detail['date'])}" if detail["date"] else ""
+                                    lines.append(f"• {esc(prefix + attributes)} {link(label, card['url'])}{date}")
+                                if lines:
+                                    alerts.append((f"DokkanDB {region} update: nuovi personaggi", lines))
 
                     if news_due:
                         news_key = f"{region}|news"
@@ -538,8 +537,9 @@ def main() -> int:
                         old_news = state.get(news_key)
                         current_news_ids = [item["id"] for item in news]
                         next_state[news_key] = current_news_ids
-                        if old_news is None: print(f"Baseline news creato: {region}")
-                        elif current_news_ids and current_news_ids[0] != old_news[0]:
+                        if old_news is None:
+                            print(f"Baseline news creato: {region}")
+                        else:
                             old_set = set(old_news)
                             fresh = [item for item in news if item["id"] not in old_set]
                             if fresh:
@@ -553,8 +553,9 @@ def main() -> int:
                             old_summons = state.get(summon_key)
                             current_summon_ids = [item["id"] for item in summons]
                             next_state[summon_key] = current_summon_ids
-                            if old_summons is None: print(f"Baseline summon {summon_label} creato: {region}")
-                            elif current_summon_ids and current_summon_ids[0] != old_summons[0]:
+                            if old_summons is None:
+                                print(f"Baseline summon {summon_label} creato: {region}")
+                            else:
                                 old_set = set(old_summons)
                                 fresh = [item for item in summons if item["id"] not in old_set]
                                 if fresh:
@@ -567,7 +568,8 @@ def main() -> int:
                         quest, added_stages = inspect_quests(page, region, previous)
                         if quest is not None:
                             next_state[quest_key] = {"area": quest["area"], "stages": quest["stages"]}
-                            if previous is None: print(f"Baseline Quest creato: {region} — area {quest['area']}")
+                            if previous is None:
+                                print(f"Baseline Quest creato: {region} — area {quest['area']}")
                             elif added_stages:
                                 stage_word = "nuovo stage" if len(added_stages) == 1 else "nuovi stage"
                                 numbers = ", ".join(str(n) for n in added_stages)
