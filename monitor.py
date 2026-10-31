@@ -521,7 +521,7 @@ def main() -> int:
                             if added:
                                 lines = []
                                 for card in added:
-                                    detail = card_detail(page, card["href"], region)
+                                    detail = card_detail(page, card["url"], region)
                                     name = detail["name"] or card["name"] or f"Card {card['id']}"
                                     attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
                                     prefix = f"{detail['awakening']} " if detail["awakening"] else ""
