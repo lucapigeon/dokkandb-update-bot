@@ -2,9 +2,9 @@
   "telegram_chat_ids_enc": "gAAAAABq5iz0iEzw4-vHnRMpw36nn2aMP_WImumgBKxCHqREBM85joarJaq8h0bZ2SCCA7zjwXIhhZhEXnYTP_k7RIezLGvO4fUBMsGR7epB0HFKAEfYzTukr_14jmmMQO6ew15eTeKE",
   "telegram_update_offset": 896954179,
   "GLB|cards": [
-    "1034861",
-    "1034731",
-    "1013391",
+    "1024751",
+    "1024751",
+    "1024751",
     "1027581",
     "1034681",
     "1032241",
@@ -18,7 +18,7 @@
     "1034151"
   ],
   "GLB|news": [
-    "107517",
+    "100197",
     "100197",
     "107371",
     "107370",
@@ -102,7 +102,7 @@
     "12588"
   ],
   "GLB|summons|3": [
-    "12598",
+    "12398",
     "12586",
     "12396",
     "12398",
@@ -144,7 +144,7 @@
     ]
   },
   "GLB|events|story": [
-    "/events/story/1215",
+    "/events/story/378",
     "/events/story/378",
     "/events/story/1204",
     "/events/story/284",
@@ -733,9 +733,9 @@
     "/events/battlefield/106"
   ],
   "JP|cards": [
-    "1034861",
     "1034731",
     "1013391",
+    "1027581",
     "1027581",
     "1034681",
     "1032241",
@@ -749,7 +749,7 @@
     "1034151"
   ],
   "JP|news": [
-    "301806",
+    "301828",
     "301828",
     "301863",
     "301772",
@@ -832,7 +832,7 @@
   "JP|summons|3": [
     "2248",
     "2175",
-    "2176",
+    "1744",
     "1744",
     "1598",
     "1597",
