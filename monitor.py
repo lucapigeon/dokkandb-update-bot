@@ -142,24 +142,35 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
 def card_detail(page, href: str, region: str) -> dict[str, str]:
     switch_region(page, href, region)
     data = page.locator("body").evaluate(
-        """body => ({text:body.innerText||'',heads:[...body.querySelectorAll('h1,h2,h3,h4')].map(x=>(x.innerText||'').trim()).filter(Boolean),
-        imgs:[...body.querySelectorAll('img')].map(x=>x.getAttribute('src')||'')})"""
+        """body => {
+            const main = body.querySelector('main') || body;
+            return {
+                text: main.innerText || '',
+                heads: [...main.querySelectorAll('h1,h2,h3,h4')].map(x => (x.innerText||'').trim()).filter(Boolean),
+                imgs: [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || '')
+            };
+        }"""
     )
     lines = [plain(x) for x in data["text"].splitlines() if plain(x)]
     heads = [plain(x) for x in data["heads"]]
-    main = next((x for x in heads if re.search(r"\s+-\s+Card Details$", x, re.I)), "")
-    name = re.sub(r"\s+-\s+Card Details$", "", main, flags=re.I)
+    main_heading = next((x for x in heads if re.search(r"\s+-\s+Card Details$", x, re.I)), "")
+    name = re.sub(r"\s+-\s+Card Details$", "", main_heading, flags=re.I)
 
-    # 1. Cerca il titolo ufficiale tra parentesi quadre [Titolo]
+    # Parole chiave di privacy/cookie da ignorare sempre
+    privacy_words = r"privacy|cookie|personal information|terms|consent|rights|do not sell"
+
+    # 1. Cerca il titolo ufficiale tra parentesi quadre [Titolo], saltando i banner privacy
     title = ""
-    bracket_match = re.search(r"\[([^\]]+)\]", data["text"])
-    if bracket_match:
-        title = plain(bracket_match.group(1))
+    for match in re.finditer(r"\[([^\]]+)\]", data["text"]):
+        candidate = plain(match.group(1))
+        if not re.search(privacy_words, candidate, re.I) and len(candidate) > 1:
+            title = candidate
+            break
 
-    # 2. Fallback: filtra tutte le intestazioni di sezione tecniche
+    # 2. Fallback: filtra le intestazioni tecniche e di privacy
     if not title:
-        ignored_pattern = r"\b(?:card|details|stats|multiplier|skill|skills|categories|links|attack|awakening|eza|seza|same name|similar|leader|passive|super)\b"
-        candidates = [x for x in heads if x != main and not re.search(ignored_pattern, x, re.I)]
+        ignored_pattern = r"\b(?:card|details|stats|multiplier|skill|skills|categories|links|attack|awakening|eza|seza|same name|similar|leader|passive|super|" + privacy_words + r")\b"
+        candidates = [x for x in heads if x != main_heading and not re.search(ignored_pattern, x, re.I)]
         title = candidates[0] if candidates else ""
 
     img_text = " ".join(data["imgs"])
