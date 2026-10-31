@@ -421,8 +421,8 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
 
-"""
-# CONTROLLA SOLO I PERSONAGGI AD OGNI RUN
+
+# CONTROLLA SOLO I PERSONAGGI AD OGNI RUN test 5 minuti
     return {"GLB", "JP"}, False, False, set(), set(), False
 """
     if "--full" in sys.argv:
@@ -459,7 +459,7 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
         event_scan_regions.add("JP")
 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
-
+"""
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
         state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
