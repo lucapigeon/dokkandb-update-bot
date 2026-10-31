@@ -45,7 +45,6 @@ def plain(text: str) -> str:
 def switch_region(page, path: str, region: str) -> None:
     page.goto(urljoin(BASE, path), wait_until="domcontentloaded", timeout=60_000)
     try:
-        # Metodo originale con checkbox
         jp_selector = page.get_by_role("checkbox", name="JP", exact=True)
         jp_selector.wait_for(state="attached", timeout=8_000)
         if jp_selector.is_checked() != (region == "JP"):
@@ -53,7 +52,6 @@ def switch_region(page, path: str, region: str) -> None:
             selector.click()
             page.wait_for_timeout(1_200)
     except Exception:
-        # Fallback ultra-robusto: cerca qualsiasi elemento che contenga il testo GLB o JP
         selector = page.locator(f'text="{region}"').first
         selector.wait_for(state="visible", timeout=15_000)
         selector.click()
@@ -106,7 +104,6 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         if response is not None and response.status >= 400:
             break
         
-        # Stesso fix del bottone regione usato qui
         try:
             selector = page.get_by_role("button", name=region, exact=True)
             selector.wait_for(state="visible", timeout=8_000)
@@ -294,6 +291,9 @@ def challenge_stages(page, event: dict[str, str], region: str) -> list[dict[str,
 def esc(text: str) -> str:
     return html.escape(plain(text), quote=True)
 
+def link(label: str, url: str) -> str:
+    return f'<a href="{html.escape(url, quote=True)}">{esc(label)}</a>'
+
 def telegram_send(text: str, chat_id: str | None = None) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = str(chat_id or os.environ["TELEGRAM_CHAT_ID"])
@@ -401,11 +401,9 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    # Se in futuro vuoi forzare manualmente una scansione completa, userai la flag --full
     if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
     ora = now.hour
-    # Arrotondiamo il minuto al multiplo di 5 più vicino (GitHub Actions può ritardare di 1-2 minuti)
     minuto = 5 * round(now.minute / 5)
     if minuto == 60:
         minuto = 0
@@ -490,7 +488,6 @@ def main() -> int:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # USER AGENT aggiunto per bypassare blocchi Cloudflare
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             locale="en-US", 
