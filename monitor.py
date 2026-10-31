@@ -157,24 +157,16 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
     name = re.sub(r"\s+-\s+Card Details$", "", main_heading, flags=re.I)
 
     img_text = " ".join(data["imgs"])
-    rarity_match = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
-    type_match = re.search(r"type[_-]icon[_-]?(1[0-4])", img_text, re.I)
+    rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
+    type_code = re.search(r"type[_-]icon[_-]?(1[0-4])", img_text, re.I)
     card_text = " ".join([name, *heads, *lines[-55:], img_text])
     awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
-
-    # Seleziona la data EZA/SEZA se presente, altrimenti la data di rilascio
-    date_lines = [line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)]
-    if awakening in ("EZA", "SEZA") and len(date_lines) > 1:
-        date = date_lines[-1]  # Data dell'EZA / SEZA
-    elif date_lines:
-        date = date_lines[0]   # Data di rilascio iniziale
-    else:
-        date = ""
-
+    date = next((line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)), "")
+    
     return {
         "name": name,
-        "rarity": rarity_match.group(1).upper() if rarity_match else "",
-        "type": TYPE_BY_CODE.get(type_match.group(1), "") if type_match else "",
+        "rarity": rarity.group(1).upper() if rarity else "",
+        "type": TYPE_BY_CODE.get(type_code.group(1), "") if type_code else "",
         "awakening": awakening,
         "date": date
     }
@@ -420,7 +412,10 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    if "--full" in sys.argv:
+    # CONTROLLA SOLO I PERSONAGGI AD OGNI RUN
+    return {"GLB", "JP"}, False, False, set(), set(), False    
+    
+    """if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
     ora = now.hour
     minuto = 5 * round(now.minute / 5)
@@ -453,7 +448,7 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
     if ora in [7, 19] and minuto == 30:
         event_scan_regions.add("JP")
 
-    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
+    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False"""
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
@@ -542,15 +537,12 @@ def main() -> int:
                                 for card in added:
                                     detail = card_detail(page, card["url"], region)
                                     name = detail["name"] or card["name"] or f"Card {card['id']}"
-                                    
-                                    # Usa primariamente rarità e tipo accurati dalla griglia carte
-                                    rarity = card.get("rarity") or detail.get("rarity") or ""
-                                    card_type = card.get("type") or detail.get("type") or ""
-                                    
-                                    attributes = " ".join(v for v in (rarity, card_type) if v)
+                                    attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
                                     prefix = f"{detail['awakening']} " if detail["awakening"] else ""
                                     
+                                    # Formattazione data pulita (senza backslash dentro l'f-string)
                                     date_part = f" — {esc(detail['date'])}" if detail.get("date") else ""
+                                    
                                     lines.append(f"• {esc(prefix + attributes)} {link(name, card['url'])}{date_part}")
                                 if lines:
                                     alerts.append((f"DokkanDB {region} update: nuovi personaggi", lines))
