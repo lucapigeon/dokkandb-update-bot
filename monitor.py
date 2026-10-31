@@ -62,24 +62,6 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
 
     def read_page() -> list[dict]:
         return page.locator('a[href^="/cards/"]').evaluate_all(
-            """els => {
-              const seen = new Set(), out = [];
-              for (const a of els) {
-                const href = a.getAttribute('href');
-                if (!href || !/^\\/cards\\/\\d+/.test(href) || seen.has(href)) continue;
-                seen.add(href);
-                let root = a;
-                for (let i=0; i<6 && root; i++, root=root.parentElement) {
-                  const cardLinks = root.querySelectorAll('a[href^="/cards/"]');
-                  if (cardLinks.length === 1 && root.querySelector('img')) break;
-                }
-                root = root || a;
-                const imgs = [...(root?.querySelectorAll('img') || [] )].map(i => ({src:i.getAttribute('src')||'', alt:i.alt||''}));
-                out.push({href, name:(a.innerText||a.getAttribute('aria-label')||'').trim(),
-                  tile:(root?.innerText||'').trim().slice(0,500), imgs});
-              }
-              return out;
-            }"""
         )
 
     raw_cards = read_page()
@@ -88,15 +70,6 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         if not known_ids or any(re.search(r"/cards/(\d+)", card["href"])[1] in known_ids for card in raw_cards):
             break
         next_href = page.locator('a[href^="/cards"]').evaluate_all(
-            """els => {
-              const anchors=els.map(a=>({href:a.getAttribute('href'),text:(a.innerText||'').trim(),
-                aria:a.getAttribute('aria-label')||'',title:a.title||'',rel:a.rel||''})).filter(a=>a.href);
-              const next=anchors.find(a=>/next/i.test(a.aria+' '+a.title+' '+a.rel) || /^(next|›|»|→)$/i.test(a.text));
-              if(next) return next.href;
-              const current=Number(new URL(location.href).searchParams.get('page')||'1');
-              const numbered=anchors.filter(a=>a.text===String(current+1));
-              return numbered.length ? numbered[0].href : null;
-            }"""
         )
         if not next_href:
             break
@@ -142,14 +115,6 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
 def card_detail(page, href: str, region: str) -> dict[str, str]:
     switch_region(page, href, region)
     data = page.locator("body").evaluate(
-        """body => {
-            const main = body.querySelector('main') || body;
-            return {
-                text: main.innerText || '',
-                heads: [...main.querySelectorAll('h1,h2,h3,h4')].map(x => (x.innerText||'').trim()).filter(Boolean),
-                imgs: [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || '')
-            };
-        }"""
     )
     lines = [plain(x) for x in data["text"].splitlines() if plain(x)]
     heads = [plain(x) for x in data["heads"]]
@@ -174,11 +139,6 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
 def extract_news(page, region: str) -> list[dict[str, str]]:
     switch_region(page, "/news", region)
     entries = page.locator('a[href^="/news/"]').evaluate_all(
-        """els => { const seen=new Set(), out=[]; for(const a of els){
-          const href=a.getAttribute('href'); if(!href || !/^\\/news\\/\\d+/.test(href) || seen.has(href)) continue;
-          seen.add(href); const root=a.closest('article')||a.parentElement?.parentElement||a;
-          out.push({href,title:(a.querySelector('h1,h2,h3,h4')?.innerText||a.innerText||'').trim(),text:(root?.innerText||'').trim().slice(0,300)});
-        } return out; }"""
     )
     return [{"id": re.search(r"/news/(\d+)", e["href"])[1], "url": urljoin(BASE, e["href"]),
              "title": plain(e["title"]).split("\n")[0], "date": news_date(e["text"])} for e in entries]
@@ -215,11 +175,6 @@ def news_date(value: str) -> str:
 def extract_summons(page, region: str, category: int) -> list[dict[str, str]]:
     switch_region(page, f"/summons?category={category}&page=1", region)
     entries = page.locator('a[href^="/summons/"]').evaluate_all(
-        """els => { const seen=new Set(), out=[]; for(const a of els){
-          const href=a.getAttribute('href'); if(!href || !/^\\/summons\\/\\d+$/.test(href) || seen.has(href)) continue;
-          seen.add(href); const root=a.closest('article')||a.parentElement?.parentElement||a;
-          out.push({href,title:(a.querySelector('h1,h2,h3,h4')?.innerText||a.innerText||'').trim(),text:(root?.innerText||'').trim().slice(0,350)});
-        } return out; }"""
     )
     return [{"id": re.search(r"/summons/(\d+)", item["href"])[1],
              "url": urljoin(BASE, item["href"]), "title": plain(item["title"]).split("\n")[0],
@@ -228,12 +183,6 @@ def extract_summons(page, region: str, category: int) -> list[dict[str, str]]:
 def extract_events(page, region: str, path: str) -> list[dict[str, str]]:
     switch_region(page, path, region)
     entries = page.locator('a[href^="/events/"]').evaluate_all(
-        """els => { const seen=new Set(), out=[]; for(const a of els){
-          const href=a.getAttribute('href');
-          if(!href || !/^\\/events\\/[^/?]+\\/\\d+(?:\\?.*)?$/.test(href) || seen.has(href)) continue;
-          seen.add(href); const root=a.closest('article')||a.parentElement?.parentElement||a;
-          out.push({href,title:(a.innerText||a.getAttribute('aria-label')||'').trim(),text:(root?.innerText||'').trim().slice(0,300)});
-        } return out; }"""
     )
     result = []
     for e in entries:
@@ -250,10 +199,6 @@ def quest_area(page, region: str, area_number: int) -> dict[str, object] | None:
             return None
         switch_region(page, f"/events/quests/{area_number}", region)
         stage_ids = page.locator('a[href*="/events/quests/"]').evaluate_all(
-            """els => { const ids=new Set(); for(const a of els){
-              const m=(a.getAttribute('href')||'').match(/^\\/events\\/quests\\/(\\d+)\\/(\\d+)$/);
-              if(m) ids.add(m[2]);
-            } return [...ids]; }"""
         )
         stages = sorted({int(stage_id) % 1000 // 10 for stage_id in stage_ids})
         if not stages:
@@ -284,17 +229,6 @@ def challenge_stages(page, event: dict[str, str], region: str) -> list[dict[str,
     path = event["url"].replace(BASE, "")
     switch_region(page, path, region)
     values = page.locator('a[href*="/events/challenge/"]').evaluate_all(
-        """els => { const seen=new Set(), out=[]; for(const a of els){
-          const href=a.getAttribute('href'); if(!href || !/^\\/events\\/challenge\\/\\d+\\/\\d+$/.test(href) || seen.has(href)) continue;
-          seen.add(href); let node=a, best='';
-          for(let i=0;i<5 && node;i++,node=node.parentElement){ const t=(node.innerText||'').trim();
-            if(t.length>best.length && t.length<220 && /BOSS STATS/i.test(t)) best=t;
-          }
-          const lines=(best||'').split('\\n').map(x=>x.trim()).filter(Boolean);
-          const num=lines.find(x=>/^\\d+$/.test(x))||'';
-          const label=lines.find(x=>x!==num && !/BOSS STATS|SUPER[0-9]?|STA|LL RATE|EXP|CLEAR REWARD|FEATURED REWARDS|None/i.test(x))||'';
-          out.push({href,number:num,label});
-        } return out; }"""
     )
     return [{"url": urljoin(BASE, s["href"]), "number": s["number"], "label": s["label"]}
             for s in values]
