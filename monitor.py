@@ -536,12 +536,18 @@ def main() -> int:
                                     name = detail["name"] or card["name"] or f"Card {card['id']}"
                                     attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
                                     prefix = f"{detail['awakening']} " if detail["awakening"] else ""
-                                    label = " ".join(v for v in (detail["title"], name) if v)
+                                    
+                                    # Formatta come: Titolo - Nome
+                                    title_str = detail["title"]
+                                    if title_str and title_str.lower() != name.lower():
+                                        label = f"{title_str} - {name}"
+                                    else:
+                                        label = name
+                                        
                                     date = f" — {esc(detail['date'])}" if detail["date"] else ""
                                     lines.append(f"• {esc(prefix + attributes)} {link(label, card['url'])}{date}")
                                 if lines:
                                     alerts.append((f"DokkanDB {region} update: nuovi personaggi", lines))
-
                     if news_due:
                         news_key = f"{region}|news"
                         news = extract_news(page, region)
