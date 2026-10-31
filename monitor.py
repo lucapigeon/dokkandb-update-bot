@@ -36,11 +36,29 @@ EVENT_CATEGORIES = [
     ("db_movies", "DB Story · Movies", "/events?category=9000&dbStory=3"),
     ("battlefield", "Battlefield", "/events?category=10000"),
 ]
-TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
 ROME = ZoneInfo("Europe/Rome")
 
 def plain(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
+
+def parse_type(text: str) -> str:
+    # 1. Cerca tipi Super/Extreme (type_icon_01.png fino a type_icon_10.png)
+    m_icon = re.search(r"type[_-]icon[_-]?0?([1-9]|10)\b", text, re.I)
+    if m_icon:
+        v = int(m_icon.group(1))
+        if v in (1, 2): return "AGL"
+        if v in (3, 4): return "TEQ"
+        if v in (5, 6): return "INT"
+        if v in (7, 8): return "STR"
+        if v in (9, 10): return "PHY"
+    
+    # 2. Cerca tipi Base (es. classi CSS type_10, o immagini type_icon_11.png)
+    m_base = re.search(r"\btype[_-](?:icon[_-]?)?(1[0-4])\b", text, re.I)
+    if m_base:
+        v = int(m_base.group(1))
+        return {10: "AGL", 11: "TEQ", 12: "INT", 13: "STR", 14: "PHY"}.get(v, "")
+    
+    return ""
 
 def switch_region(page, path: str, region: str) -> None:
     page.goto(urljoin(BASE, path), wait_until="domcontentloaded", timeout=60_000)
@@ -126,9 +144,7 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         card_id = re.search(r"/cards/(\d+)", card["href"])[1]
         html_content = card.get("html", "")
         
-        # Estrazione solida da CSS o immagini: cerca stringhe come "rare_UR" e "type_10"
         rarity_match = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", html_content, re.I)
-        type_match = re.search(r"type[_-](?:icon[_-]?)?(1[0-4])\b", html_content, re.I)
         
         tile = plain(card.get("tile", ""))
         name = plain(card.get("name", "")).split("\n")[0]
@@ -139,13 +155,12 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         detail = {
             "title": "", "name": name,
             "rarity": rarity_match.group(1).upper() if rarity_match else "",
-            "type": TYPE_BY_CODE.get(type_match.group(1), "") if type_match else "",
+            "type": parse_type(html_content),
             "awakening": awakening, "date": date_match.group(0) if date_match else "",
         }
         output.append({"id": card_id, "url": urljoin(BASE, card["href"]), **detail,
                        "name": detail.get("name") or plain(card.get("name")) or f"Card {card_id}"})
-    return output
-    
+    return output    
 def card_detail(page, href: str, region: str) -> dict[str, str]:
     switch_region(page, href, region)
     data = page.locator("body").evaluate(
