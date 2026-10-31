@@ -169,7 +169,8 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
             return {
                 text: main.innerText || '',
                 heads: [...main.querySelectorAll('h1,h2,h3,h4')].map(x => (x.innerText||'').trim()).filter(Boolean),
-                imgs: [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || '')
+                imgs: [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || ''),
+                html: main.innerHTML || ''
             };
         }"""
     )
@@ -180,11 +181,10 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
 
     img_text = " ".join(data["imgs"])
     rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
-    type_code = re.search(r"type[_-]icon[_-]?(1[0-4])", img_text, re.I)
+    
     card_text = " ".join([name, *heads, *lines[-55:], img_text])
     awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
 
-    # Seleziona l'ultima data se è EZA/SEZA, altrimenti la prima (release)
     date_lines = [line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)]
     if awakening in ("EZA", "SEZA") and len(date_lines) > 1:
         date = date_lines[-1]
@@ -196,7 +196,7 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
     return {
         "name": name,
         "rarity": rarity.group(1).upper() if rarity else "",
-        "type": TYPE_BY_CODE.get(type_code.group(1), "") if type_code else "",
+        "type": parse_type(data.get("html", "")),
         "awakening": awakening,
         "date": date
     }
