@@ -413,9 +413,9 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
     # CONTROLLA SOLO I PERSONAGGI AD OGNI RUN
-    return {"GLB", "JP"}, False, False, set(), set(), False    
+    """return {"GLB", "JP"}, False, False, set(), set(), False"""    
     
-    """if "--full" in sys.argv:
+    if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
     ora = now.hour
     minuto = 5 * round(now.minute / 5)
@@ -448,7 +448,7 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
     if ora in [7, 19] and minuto == 30:
         event_scan_regions.add("JP")
 
-    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False"""
+    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
