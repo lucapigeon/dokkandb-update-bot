@@ -156,31 +156,20 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
     main_heading = next((x for x in heads if re.search(r"\s+-\s+Card Details$", x, re.I)), "")
     name = re.sub(r"\s+-\s+Card Details$", "", main_heading, flags=re.I)
 
-    # Parole chiave di privacy/cookie da ignorare sempre
-    privacy_words = r"privacy|cookie|personal information|terms|consent|rights|do not sell"
-
-    # 1. Cerca il titolo ufficiale tra parentesi quadre [Titolo], saltando i banner privacy
-    title = ""
-    for match in re.finditer(r"\[([^\]]+)\]", data["text"]):
-        candidate = plain(match.group(1))
-        if not re.search(privacy_words, candidate, re.I) and len(candidate) > 1:
-            title = candidate
-            break
-
-    # 2. Fallback: filtra le intestazioni tecniche e di privacy
-    if not title:
-        ignored_pattern = r"\b(?:card|details|stats|multiplier|skill|skills|categories|links|attack|awakening|eza|seza|same name|similar|leader|passive|super|" + privacy_words + r")\b"
-        candidates = [x for x in heads if x != main_heading and not re.search(ignored_pattern, x, re.I)]
-        title = candidates[0] if candidates else ""
-
     img_text = " ".join(data["imgs"])
     rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
     type_code = re.search(r"type[_-]icon[_-]?(1[0-4])", img_text, re.I)
-    card_text = " ".join([title, name, *heads, *lines[-55:], img_text])
+    card_text = " ".join([name, *heads, *lines[-55:], img_text])
     awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
     date = next((line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)), "")
-    return {"title": title, "name": name, "rarity": rarity.group(1).upper() if rarity else "",
-            "type": TYPE_BY_CODE.get(type_code.group(1), "") if type_code else "", "awakening": awakening, "date": date}
+    
+    return {
+        "name": name,
+        "rarity": rarity.group(1).upper() if rarity else "",
+        "type": TYPE_BY_CODE.get(type_code.group(1), "") if type_code else "",
+        "awakening": awakening,
+        "date": date
+    }
     
 def extract_news(page, region: str) -> list[dict[str, str]]:
     switch_region(page, "/news", region)
@@ -548,17 +537,13 @@ def main() -> int:
                                     attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
                                     prefix = f"{detail['awakening']} " if detail["awakening"] else ""
                                     
-                                    # Formatta come: Titolo - Nome
-                                    title_str = detail["title"]
-                                    if title_str and title_str.lower() != name.lower():
-                                        label = f"{title_str} - {name}"
-                                    else:
-                                        label = name
-                                        
-                                    date = f" — {esc(detail['date'])}" if detail["date"] else ""
-                                    lines.append(f"• {esc(prefix + attributes)} {link(label, card['url'])}{date}")
+                                    # Formattazione data pulita (senza backslash dentro l'f-string)
+                                    date_part = f" — {esc(detail['date'])}" if detail.get("date") else ""
+                                    
+                                    lines.append(f"• {esc(prefix + attributes)} {link(name, card['url'])}{date_part}")
                                 if lines:
                                     alerts.append((f"DokkanDB {region} update: nuovi personaggi", lines))
+                                    
                     if news_due:
                         news_key = f"{region}|news"
                         news = extract_news(page, region)
