@@ -58,5 +58,6 @@ jobs:
           if [ -f state.json ]; then
             git add state.json
             git commit -m "Update state.json" || echo "Nessuna modifica a state.json"
+            git pull --rebase origin main || true
             git push
           fi
