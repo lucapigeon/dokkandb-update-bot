@@ -36,61 +36,11 @@ EVENT_CATEGORIES = [
     ("db_movies", "DB Story · Movies", "/events?category=9000&dbStory=3"),
     ("battlefield", "Battlefield", "/events?category=10000"),
 ]
+TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
 ROME = ZoneInfo("Europe/Rome")
 
 def plain(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
-
-def detect_card_attributes(html_content: str, imgs: list[dict]) -> tuple[str, str, str]:
-    # 1. Rarity
-    rarity = ""
-    m_rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", html_content, re.I)
-    if m_rarity:
-        rarity = m_rarity.group(1).upper()
-        
-    # 2. Type (Cerca nelle immagini l'icona in alto a destra)
-    card_type = ""
-    for img in imgs:
-        m = re.search(r"type[_-]icon[_-]?0?([1-9]|10)\b", img["src"], re.I)
-        if m:
-            v = int(m.group(1))
-            if v in (1, 2): card_type = "AGL"
-            elif v in (3, 4): card_type = "TEQ"
-            elif v in (5, 6): card_type = "INT"
-            elif v in (7, 8): card_type = "STR"
-            elif v in (9, 10): card_type = "PHY"
-            break
-            
-    # Se non c'è l'icona, cerca le classi CSS dei tipi base (es. type_10 = AGL)
-    if not card_type:
-        m_base = re.search(r"\btype[_-](?:icon[_-]?)?(1[0-4])\b", html_content, re.I)
-        if m_base:
-            v = int(m_base.group(1))
-            card_type = {10: "AGL", 11: "TEQ", 12: "INT", 13: "STR", 14: "PHY"}.get(v, "")
-            
-    # 3. Awakening
-    awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", html_content, re.I) else ("EZA" if re.search(r"\bEZA\b", html_content, re.I) else "")
-    
-    return rarity, card_type, awakening
-
-def parse_type(text: str) -> str:
-    # 1. Cerca tipi Super/Extreme (type_icon_01.png fino a type_icon_10.png)
-    m_icon = re.search(r"type[_-]icon[_-]?0?([1-9]|10)\b", text, re.I)
-    if m_icon:
-        v = int(m_icon.group(1))
-        if v in (1, 2): return "AGL"
-        if v in (3, 4): return "TEQ"
-        if v in (5, 6): return "INT"
-        if v in (7, 8): return "STR"
-        if v in (9, 10): return "PHY"
-    
-    # 2. Cerca tipi Base (es. classi CSS type_10, o immagini type_icon_11.png)
-    m_base = re.search(r"\btype[_-](?:icon[_-]?)?(1[0-4])\b", text, re.I)
-    if m_base:
-        v = int(m_base.group(1))
-        return {10: "AGL", 11: "TEQ", 12: "INT", 13: "STR", 14: "PHY"}.get(v, "")
-    
-    return ""
 
 def switch_region(page, path: str, region: str) -> None:
     page.goto(urljoin(BASE, path), wait_until="domcontentloaded", timeout=60_000)
@@ -118,28 +68,15 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
                 const href = a.getAttribute('href');
                 if (!href || !/^\\/cards\\/\\d+/.test(href) || seen.has(href)) continue;
                 seen.add(href);
-                
                 let root = a;
-                // Isola in modo infallibile il contenitore: si ferma se il genitore ha altri link di carte!
-                while (root.parentElement) {
-                    const links = [...root.parentElement.querySelectorAll('a[href^="/cards/"]')];
-                    const uniqueHrefs = new Set(links.map(l => l.getAttribute('href').replace(/\\?.*/, '')));
-                    if (uniqueHrefs.size > 1) break;
-                    root = root.parentElement;
+                for (let i=0; i<6 && root; i++, root=root.parentElement) {
+                  const cardLinks = root.querySelectorAll('a[href^="/cards/"]');
+                  if (cardLinks.length === 1 && root.querySelector('img')) break;
                 }
-                
-                const imgs = [...root.querySelectorAll('img')].map(img => ({
-                    src: img.getAttribute('src') || '', 
-                    alt: img.getAttribute('alt') || ''
-                }));
-                
-                out.push({
-                  href, 
-                  name: (a.innerText||a.getAttribute('aria-label')||'').trim(),
-                  tile: (root.innerText||'').trim().slice(0,500), 
-                  html: root.innerHTML,
-                  imgs: imgs
-                });
+                root = root || a;
+                const imgs = [...(root?.querySelectorAll('img') || [] )].map(i => ({src:i.getAttribute('src')||'', alt:i.alt||''}));
+                out.push({href, name:(a.innerText||a.getAttribute('aria-label')||'').trim(),
+                  tile:(root?.innerText||'').trim().slice(0,500), imgs});
               }
               return out;
             }"""
@@ -180,29 +117,37 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         raw_cards = read_page()
         known_page_ids = {re.search(r"/cards/(\d+)", card["href"])[1] for card in collected}
         collected.extend(card for card in raw_cards if re.search(r"/cards/(\d+)", card["href"])[1] not in known_page_ids)
-    
+    cards = collected
     output = []
-    for card in collected:
+    for card in cards:
         card_id = re.search(r"/cards/(\d+)", card["href"])[1]
-        
-        # Sfrutta il nuovo blocco logico
-        rarity, card_type, awakening = detect_card_attributes(card.get("html", ""), card.get("imgs", []))
-        
+        image_info = " ".join(f"{i['src']} {i['alt']}" for i in card.get("imgs", []))
+        rarity_match = re.search(r"(?:rare[_-])?(LR|UR|SSR|SR|R|N)(?:\.png|\b)", image_info, re.I)
+
+        # 1) prova a leggere il type direttamente dall'alt o dal src (es. "AGL", "TEQ", ...)
+        type_match = re.search(r"\b(AGL|TEQ|INT|STR|PHY)\b", image_info, re.I)
+        if type_match:
+            type_code = None  # non serve il codice numerico
+            type_name = type_match.group(1).upper()
+        else:
+            # 2) fallback: vecchia regex con codice numerico
+            type_match = re.search(r"type[_-]icon[_-]?(1[0-4])", image_info, re.I)
+            type_code = type_match.group(1) if type_match else None
+            type_name = TYPE_BY_CODE.get(type_code, "") if type_code else ""
         tile = plain(card.get("tile", ""))
         name = plain(card.get("name", "")).split("\n")[0]
         date_match = re.search(r"\b\d{1,2}[ /-][A-Za-z]{3,}[^\n]{0,24}\b\d{1,2}:\d{2}\b", tile)
-            
+        awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", image_info, re.I) else (
+            "EZA" if re.search(r"\bEZA\b", image_info, re.I) else "")
         detail = {
             "title": "", "name": name,
-            "rarity": rarity,
-            "type": card_type,
-            "awakening": awakening, 
-            "date": date_match.group(0) if date_match else "",
+            "rarity": rarity_match.group(1).upper() if rarity_match else "",
+            "type": type_name,
+            "awakening": awakening, "date": date_match.group(0) if date_match else "",
         }
         output.append({"id": card_id, "url": urljoin(BASE, card["href"]), **detail,
                        "name": detail.get("name") or plain(card.get("name")) or f"Card {card_id}"})
     return output
-
 
 def card_detail(page, href: str, region: str) -> dict[str, str]:
     switch_region(page, href, region)
@@ -212,11 +157,8 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
             return {
                 text: main.innerText || '',
                 heads: [...main.querySelectorAll('h1,h2,h3,h4')].map(x => (x.innerText||'').trim()).filter(Boolean),
-                imgs: [...main.querySelectorAll('img')].map(x => ({
-                    src: x.getAttribute('src') || '',
-                    alt: x.getAttribute('alt') || ''
-                })),
-                html: main.innerHTML || ''
+                imgs: [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || ''),
+                alts: [...main.querySelectorAll('img')].map(x => x.getAttribute('alt') || '')
             };
         }"""
     )
@@ -225,26 +167,29 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
     main_heading = next((x for x in heads if re.search(r"\s+-\s+Card Details$", x, re.I)), "")
     name = re.sub(r"\s+-\s+Card Details$", "", main_heading, flags=re.I)
 
-    # Identificazione infallibile tramite la nuova logica
-    rarity, card_type, awakening = detect_card_attributes(data.get("html", ""), data.get("imgs", []))
-    
-    # Fallback per stringhe testuali in caso l'immagine EZA sia altrove
-    card_text = " ".join([name, *heads, *lines[-55:]])
-    if not awakening:
-        awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
-
-    date_lines = [line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)]
-    if awakening in ("EZA", "SEZA") and len(date_lines) > 1:
-        date = date_lines[-1]
-    elif date_lines:
-        date = date_lines[0]
+        # includi anche gli alt delle immagini
+    img_text = " ".join(
+        f"{src} {alt}" for src, alt in zip(data["imgs"], data.get("alts", []))
+    )
+    rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
+        # 1) type direttamente dall'alt o dal src (es. "AGL", "TEQ", ...)
+    type_match = re.search(r"\b(AGL|TEQ|INT|STR|PHY)\b", img_text, re.I)
+    if type_match:
+        type_code = None
+        type_name = type_match.group(1).upper()
     else:
-        date = ""
+        # 2) fallback: vecchia regex con codice numerico
+        type_match = re.search(r"type[_-]icon[_-]?(1[0-4])", img_text, re.I)
+        type_code = type_match.group(1) if type_match else None
+        type_name = TYPE_BY_CODE.get(type_code, "") if type_code else ""
+    card_text = " ".join([name, *heads, *lines[-55:], img_text])
+    awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
+    date = next((line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)), "")
     
     return {
         "name": name,
-        "rarity": rarity,
-        "type": card_type,
+        "rarity": rarity.group(1).upper() if rarity else "",
+        "type": type_name,
         "awakening": awakening,
         "date": date
     }
@@ -490,12 +435,10 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-
-
-# CONTROLLA SOLO I PERSONAGGI AD OGNI RUN test 5 minuti
-    return {"GLB", "JP"}, False, False, set(), set(), False
-"""
-    if "--full" in sys.argv:
+    # CONTROLLA SOLO I PERSONAGGI AD OGNI RUN
+    return {"GLB", "JP"}, False, False, set(), set(), False    
+    
+    """if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
     ora = now.hour
     minuto = 5 * round(now.minute / 5)
@@ -528,8 +471,8 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
     if ora in [7, 19] and minuto == 30:
         event_scan_regions.add("JP")
 
-    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
-"""
+    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False"""
+
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
         state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
@@ -617,13 +560,10 @@ def main() -> int:
                                 for card in added:
                                     detail = card_detail(page, card["url"], region)
                                     name = detail["name"] or card["name"] or f"Card {card['id']}"
-                                    
-                                    # Usa primariamente i dati precisi rilevati dalla griglia carte
-                                    rarity = card.get("rarity") or detail.get("rarity") or ""
-                                    card_type = card.get("type") or detail.get("type") or ""
-                                    
-                                    attributes = " ".join(v for v in (rarity, card_type) if v)
+                                    attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
                                     prefix = f"{detail['awakening']} " if detail["awakening"] else ""
+                                    
+                                    # Formattazione data pulita (senza backslash dentro l'f-string)
                                     date_part = f" — {esc(detail['date'])}" if detail.get("date") else ""
                                     
                                     lines.append(f"• {esc(prefix + attributes)} {link(name, card['url'])}{date_part}")
