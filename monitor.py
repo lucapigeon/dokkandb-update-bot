@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -41,6 +42,7 @@ TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
 TYPE_ICON_RE = re.compile(r"type[_-]icon[_-]?(1[0-4])", re.I)
 TYPE_CODE_RE = re.compile(r"\b(AGL|TEQ|INT|STR|PHY)\b", re.I)
 ROME = ZoneInfo("Europe/Rome")
+STARTUP_DELAY_SECONDS = 30
 
 def plain(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
@@ -1142,6 +1144,14 @@ def main() -> int:
     cache_hits = {"GLB": 0, "JP": 0}
     checked_sections: dict[str, list[str]] = {"GLB": [], "JP": []}
     category_by_key = {key: (key, label, path) for key, label, path in EVENT_CATEGORIES}
+
+    # Small grace period: let DokkanDB finish publishing updates scheduled exactly
+    # on the hour/half-hour before Chromium starts reading the pages.
+    print(
+        f"Attesa iniziale di {STARTUP_DELAY_SECONDS} secondi prima della scansione DokkanDB "
+        "per dare tempo al sito di pubblicare gli aggiornamenti."
+    )
+    time.sleep(STARTUP_DELAY_SECONDS)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
