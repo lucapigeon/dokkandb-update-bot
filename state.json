@@ -140,15 +140,15 @@
       4,
       5,
       6,
-      1,
-      1
+      7,
+      8
     ]
   },
   "GLB|events|story": [
-    "/events/story/11",
-    "/events/story/11",
-    "/events/story/11",
-    "/events/story/11",
+    "/events/story/1215",
+    "/events/story/378",
+    "/events/story/1204",
+    "/events/story/284",
     "/events/story/264",
     "/events/story/239",
     "/events/story/224",
@@ -440,11 +440,11 @@
     "/events/limited/805"
   ],
   "GLB|events|challenge": [
-    "/events/challenge/1",
-    "/events/challenge/1",
-    "/events/challenge/1",
-    "/events/challenge/1",
-    "/events/challenge/1",
+    "/events/challenge/1737",
+    "/events/challenge/1751",
+    "/events/challenge/1728",
+    "/events/challenge/1778",
+    "/events/challenge/1782",
     "/events/challenge/1775",
     "/events/challenge/1723",
     "/events/challenge/713",
@@ -491,8 +491,8 @@
     "/events/challenge/711"
   ],
   "GLB|events|z_battle": [
-    "/events/zbattle/1",
-    "/events/zbattle/1",
+    "/events/zbattle/75",
+    "/events/zbattle/74",
     "/events/zbattle/32",
     "/events/zbattle/25",
     "/events/zbattle/136",
@@ -718,7 +718,7 @@
     "/events/dbstory/902"
   ],
   "GLB|events|db_movies": [
-    "/events/dbstory/1",
+    "/events/dbstory/933",
     "/events/dbstory/931",
     "/events/dbstory/922",
     "/events/dbstory/921",
@@ -731,7 +731,7 @@
     "/events/dbstory/903"
   ],
   "GLB|events|battlefield": [
-    "/events/battlefield/1"
+    "/events/battlefield/106"
   ],
   "JP|cards": [
     "1034861",
