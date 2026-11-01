@@ -46,6 +46,18 @@ def plain(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
+def clean_summon_title(value: str) -> str:
+    """Remove DokkanDB's broken-image placeholder while preserving the summon title."""
+    title = plain(value).split("\n")[0]
+    title = re.sub(
+        r"^\s*\[?\s*IMAGE\s+UNAVAILABLE\s*\]?\s*[:：–—-]?\s*",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    return plain(title)
+
+
 def type_from_images(images: list[str]) -> str:
     """Read the DokkanDB type code from image metadata when it is explicit."""
     codes = {
@@ -425,7 +437,7 @@ def extract_summons(page, region: str, category: int) -> list[dict[str, str]]:
         } return out; }"""
     )
     return [{"id": re.search(r"/summons/(\d+)", item["href"])[1],
-             "url": urljoin(BASE, item["href"]), "title": plain(item["title"]).split("\n")[0],
+             "url": urljoin(BASE, item["href"]), "title": clean_summon_title(item["title"]),
              "date": news_date(item["text"])} for item in entries]
 
 def extract_events(page, region: str, path: str) -> list[dict[str, str]]:
@@ -615,8 +627,8 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    # CONTROLLA SOLO I PERSONAGGI AD OGNI RUN test 5 min
-    return set(), False, True, set(), set(), False    
+    # CONTROLLA SOLO I PERSONAGGI AD OGNI RUN
+    return {"GLB", "JP"}, False, False, set(), set(), False    
     
     """if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
@@ -670,7 +682,7 @@ def main() -> int:
     now = datetime.now(ROME)
     card_regions, news_due, summons_due, challenge_regions, event_scan_regions, full_event_scan = get_scheduled_tasks(now)
     
-    if not any([card_regions, news_due, summons_due, challenge_regions, event_scan_regions]):
+    if not any([card_regions, news_due, challenge_regions, event_scan_regions]):
         print(f"Orario {now.strftime('%H:%M')} - Nessun controllo previsto in questo slot di 5 minuti.")
         return 0
 
