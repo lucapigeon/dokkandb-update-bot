@@ -1,8 +1,6 @@
 name: Check DokkanDB
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       test_telegram:
