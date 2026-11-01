@@ -294,6 +294,85 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
                        "name": detail.get("name") or plain(card.get("name")) or f"Card {card_id}"})
     return output
 
+CARD_DATE_RE = re.compile(
+    r"(?:"
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\s+\d{1,2},?\s+\d{4}"
+    r"|\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+    r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+    r"\s+\d{4}"
+    r"|\d{4}-\d{2}-\d{2}"
+    r"|\d{1,2}[./-]\d{1,2}[./-]\d{4}"
+    r")\s*(?:[·,–—-]\s*\d{1,2}:\d{2}(?:\s*[AP]M)?)?",
+    re.IGNORECASE,
+)
+
+
+def card_date_for_awakening(lines: list[str], headings: list[str], awakening: str) -> str:
+    """Return the release date, or the latest date from DokkanDB's Awakenings section.
+
+    DokkanDB's card page lists dates for each awakening in the "Awakenings" section.
+    For EZA/SEZA cards the last date in that section is the date of the current
+    (highest) awakening, whereas the first date on the page is the original release.
+    """
+    normalized = [plain(line) for line in lines if plain(line)]
+    if not normalized:
+        return ""
+
+    def dates_in(values: list[str]) -> list[str]:
+        return [match.group(0).strip() for line in values for match in CARD_DATE_RE.finditer(line)]
+
+    if awakening in {"EZA", "SEZA"}:
+        start = next(
+            (i for i, line in enumerate(normalized) if re.fullmatch(r"awakenings?", line, re.IGNORECASE)),
+            None,
+        )
+        if start is not None:
+            end = len(normalized)
+
+            # Use the next page heading after "Awakenings" as the boundary. The
+            # common next heading is "Stats"; headings are supplied by the DOM.
+            ordered_headings = [plain(h) for h in headings if plain(h)]
+            aw_heading_index = next(
+                (i for i, heading in enumerate(ordered_headings)
+                 if re.fullmatch(r"awakenings?", heading, re.IGNORECASE)),
+                None,
+            )
+            next_headings = ordered_headings[aw_heading_index + 1:] if aw_heading_index is not None else ["Stats"]
+            for heading in next_headings:
+                heading_pos = next(
+                    (i for i in range(start + 1, len(normalized))
+                     if normalized[i].casefold() == heading.casefold()),
+                    None,
+                )
+                if heading_pos is not None:
+                    end = heading_pos
+                    break
+
+            # Fallback boundary in case the next heading was not exposed in the
+            # headings array but is still present in the page's visible text.
+            if end == len(normalized):
+                stats_pos = next(
+                    (i for i in range(start + 1, len(normalized))
+                     if re.fullmatch(r"stats", normalized[i], re.IGNORECASE)),
+                    None,
+                )
+                if stats_pos is not None:
+                    end = stats_pos
+
+            awakening_dates = dates_in(normalized[start + 1:end])
+            if awakening_dates:
+                return awakening_dates[-1]
+
+        # Never label the original release date as an EZA/SEZA date.
+        return ""
+
+    # Non-EZA cards retain the original release-date behavior.
+    all_dates = dates_in(normalized)
+    return all_dates[0] if all_dates else ""
+
+
 def card_detail(page, href: str, region: str, fallback_type: str = "") -> dict[str, str]:
     switch_region(page, href, region)
     data = page.locator("body").evaluate(
@@ -378,8 +457,14 @@ def card_detail(page, href: str, region: str, fallback_type: str = "") -> dict[s
     )
     card_text = " ".join([name, *heads, *lines[-55:], img_text])
     awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
-    date = next((line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)), "")
-    
+    date = card_date_for_awakening(lines, heads, awakening)
+    if awakening and not date:
+        print(
+            f"Avviso: data {awakening} non rilevata nella sezione Awakenings della carta {href}; "
+            "non mostro la data di rilascio come fallback.",
+            file=sys.stderr,
+        )
+
     return {
         "name": name,
         "rarity": rarity.group(1).upper() if rarity else "",
@@ -676,8 +761,8 @@ def notify(title: str, lines: list[str], chat_preferences: list[dict], preferenc
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    # TEST: controlla tutte le categorie evento, incluse le Challenge, per GLB e JP ogni 5 minuti.
-    # Le Quest vengono controllate tramite inspect_quests(), senza rileggere la categoria /events?category=0.
+    # TEST: controlla tutte le sezioni DokkanDB ogni 5 minuti, sia GLB che JP.
+    # Le Quest vengono controllate tramite inspect_quests(); full_event_scan attiva tutte le categorie evento.
     """return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True"""
 
     if "--full" in sys.argv:
@@ -725,6 +810,7 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
         event_scan_regions.add("JP")
 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
+
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
