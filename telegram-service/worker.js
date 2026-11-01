@@ -26,18 +26,39 @@ function apiAuthorized(request, env) {
 }
 
 async function telegram(env, method, payload) {
-  if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN non configurato");
-  const response = await fetch(
-    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload || {}),
-    },
-  );
-  const result = await response.json().catch(() => ({}));
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    throw new Error("TELEGRAM_BOT_TOKEN non configurato nei Secrets del Worker");
+  }
+
+  let response;
+  try {
+    response = await fetch(
+      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload || {}),
+      },
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Telegram ${method}: errore di rete durante la richiesta (${detail})`);
+  }
+
+  const rawBody = await response.text();
+  let result = {};
+  try {
+    result = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    throw new Error(
+      `Telegram ${method}: risposta non JSON (HTTP ${response.status}): ${rawBody.slice(0, 300)}`,
+    );
+  }
+
   if (!response.ok || !result.ok) {
-    throw new Error(`Telegram ${method}: ${result.description || response.statusText || "errore"}`);
+    throw new Error(
+      `Telegram ${method}: HTTP ${response.status}: ${result.description || response.statusText || "errore senza descrizione"}`,
+    );
   }
   return result.result;
 }
@@ -339,19 +360,34 @@ async function setupWebhook(request, env, url) {
     return json({ ok: false, error: "TELEGRAM_WEBHOOK_SECRET non configurato" }, 500);
   }
   const webhookUrl = `${url.origin}/telegram/webhook`;
-  const webhook = await telegram(env, "setWebhook", {
-    url: webhookUrl,
-    secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-    allowed_updates: ["message", "my_chat_member", "callback_query"],
-    drop_pending_updates: false,
-  });
-  await telegram(env, "setMyCommands", {
-    commands: [
-      { command: "start", description: "Attiva le notifiche DokkanDB" },
-      { command: "stop", description: "Disattiva le notifiche DokkanDB" },
-      { command: "updates", description: "Scegli quali aggiornamenti ricevere" },
-    ],
-  });
+  let webhook;
+  try {
+    webhook = await telegram(env, "setWebhook", {
+      url: webhookUrl,
+      secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+      allowed_updates: ["message", "my_chat_member", "callback_query"],
+      drop_pending_updates: false,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("setupWebhook: setWebhook fallito:", detail);
+    return json({ ok: false, step: "setWebhook", error: detail }, 502);
+  }
+
+  try {
+    await telegram(env, "setMyCommands", {
+      commands: [
+        { command: "start", description: "Attiva le notifiche DokkanDB" },
+        { command: "stop", description: "Disattiva le notifiche DokkanDB" },
+        { command: "updates", description: "Scegli quali aggiornamenti ricevere" },
+      ],
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("setupWebhook: setMyCommands fallito:", detail);
+    return json({ ok: false, step: "setMyCommands", error: detail, webhook_set: true }, 502);
+  }
+
   return json({ ok: true, webhook: Boolean(webhook), url: webhookUrl });
 }
 
@@ -376,7 +412,11 @@ export default {
       }
       return json({ ok: false, error: "Not found" }, 404);
     } catch (error) {
-      console.error("Errore Worker:", error);
+      const detail = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : "";
+      // Log the message separately: structured Workers logs may display only the stack.
+      console.error("Errore Worker (dettaglio):", detail);
+      if (stack) console.error("Errore Worker (stack):", stack);
       return json({ ok: false, error: "Errore interno" }, 500);
     }
   },
