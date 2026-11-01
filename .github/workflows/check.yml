@@ -1,6 +1,8 @@
 name: Check DokkanDB
 
 on:
+  # L'avvio temporale è gestito da cron-job.org tramite workflow_dispatch.
+  # Questo workflow non contiene uno schedule GitHub, così non duplica gli avvii esterni.
   workflow_dispatch:
     inputs:
       test_telegram:
@@ -33,6 +35,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MONITOR_API_URL: ${{ secrets.MONITOR_API_URL }}
+          MONITOR_API_SECRET: ${{ secrets.MONITOR_API_SECRET }}
         run: |
           if [ "${{ github.event.inputs.test_telegram }}" == "true" ]; then
             python monitor.py --test-telegram
