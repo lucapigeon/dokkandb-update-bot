@@ -37,10 +37,23 @@ EVENT_CATEGORIES = [
     ("battlefield", "Battlefield", "/events?category=10000"),
 ]
 TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
+TYPE_ICON_RE = re.compile(r"type[_-]icon[_-]?(1[0-4])", re.I)
 ROME = ZoneInfo("Europe/Rome")
 
 def plain(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
+
+
+def type_from_images(images: list[str]) -> str:
+    """Return a type only when the supplied card scope identifies one unambiguous type."""
+    codes = {
+        match.group(1)
+        for image in images
+        if (match := TYPE_ICON_RE.search(image or "")) is not None
+    }
+    if len(codes) != 1:
+        return ""
+    return TYPE_BY_CODE.get(next(iter(codes)), "")
 
 def switch_region(page, path: str, region: str) -> None:
     page.goto(urljoin(BASE, path), wait_until="domcontentloaded", timeout=60_000)
@@ -68,6 +81,7 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
                 const href = a.getAttribute('href');
                 if (!href || !/^\\/cards\\/\\d+/.test(href) || seen.has(href)) continue;
                 seen.add(href);
+                // Keep the original image scope for rarity/EZA detection unchanged.
                 let root = a;
                 for (let i=0; i<6 && root; i++, root=root.parentElement) {
                   const cardLinks = root.querySelectorAll('a[href^="/cards/"]');
@@ -75,8 +89,21 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
                 }
                 root = root || a;
                 const imgs = [...(root?.querySelectorAll('img') || [] )].map(i => ({src:i.getAttribute('src')||'', alt:i.alt||''}));
+
+                // For the type only, find a card-specific container separately.
+                // Do not fall back to a broad ancestor containing neighboring cards.
+                let typeRoot = null;
+                for (let node=a, i=0; node && i<10; i++, node=node.parentElement) {
+                  const cardLinks = node.querySelectorAll('a[href^="/cards/"]');
+                  if (cardLinks.length === 1 && node.querySelector('img')) {
+                    typeRoot = node;
+                    break;
+                  }
+                }
+                typeRoot = typeRoot || a;
+                const typeImgs = [...typeRoot.querySelectorAll('img')].map(i => ({src:i.getAttribute('src')||'', alt:i.alt||''}));
                 out.push({href, name:(a.innerText||a.getAttribute('aria-label')||'').trim(),
-                  tile:(root?.innerText||'').trim().slice(0,500), imgs});
+                  tile:(root?.innerText||'').trim().slice(0,500), imgs, typeImgs});
               }
               return out;
             }"""
@@ -123,17 +150,10 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         card_id = re.search(r"/cards/(\d+)", card["href"])[1]
         image_info = " ".join(f"{i['src']} {i['alt']}" for i in card.get("imgs", []))
         rarity_match = re.search(r"(?:rare[_-])?(LR|UR|SSR|SR|R|N)(?:\.png|\b)", image_info, re.I)
-
-        # 1) prova a leggere il type direttamente dall'alt o dal src (es. "AGL", "TEQ", ...)
-        type_match = re.search(r"\b(AGL|TEQ|INT|STR|PHY)\b", image_info, re.I)
-        if type_match:
-            type_code = None  # non serve il codice numerico
-            type_name = type_match.group(1).upper()
-        else:
-            # 2) fallback: vecchia regex con codice numerico
-            type_match = re.search(r"type[_-]icon[_-]?(1[0-4])", image_info, re.I)
-            type_code = type_match.group(1) if type_match else None
-            type_name = TYPE_BY_CODE.get(type_code, "") if type_code else ""
+        card_type = type_from_images([
+            f"{image.get('src', '')} {image.get('alt', '')}"
+            for image in card.get("typeImgs", [])
+        ])
         tile = plain(card.get("tile", ""))
         name = plain(card.get("name", "")).split("\n")[0]
         date_match = re.search(r"\b\d{1,2}[ /-][A-Za-z]{3,}[^\n]{0,24}\b\d{1,2}:\d{2}\b", tile)
@@ -142,23 +162,48 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         detail = {
             "title": "", "name": name,
             "rarity": rarity_match.group(1).upper() if rarity_match else "",
-            "type": type_name,
+            "type": card_type,
             "awakening": awakening, "date": date_match.group(0) if date_match else "",
         }
         output.append({"id": card_id, "url": urljoin(BASE, card["href"]), **detail,
                        "name": detail.get("name") or plain(card.get("name")) or f"Card {card_id}"})
     return output
 
-def card_detail(page, href: str, region: str) -> dict[str, str]:
+def card_detail(page, href: str, region: str, fallback_type: str = "") -> dict[str, str]:
     switch_region(page, href, region)
     data = page.locator("body").evaluate(
         """body => {
             const main = body.querySelector('main') || body;
+            const headings = [...main.querySelectorAll('h1,h2,h3,h4')];
+            const cardHeading = headings.find(x => /\\s+-\\s+Card Details$/i.test((x.innerText||'').trim()));
+            const typePattern = /type[_-]icon[_-]?(1[0-4])/i;
+            let primaryTypeIcon = '';
+
+            // Walk outward from this card's own heading. The nearest scope with
+            // one unique Dokkan type belongs to the displayed card header; later
+            // sections (link partners/related cards) are deliberately excluded.
+            for (let node=cardHeading, depth=0; node && depth<10; node=node.parentElement, depth++) {
+              const codes = new Set();
+              let matchingSrc = '';
+              for (const img of node.querySelectorAll('img')) {
+                const src = img.getAttribute('src') || '';
+                const match = src.match(typePattern);
+                if (match) {
+                  codes.add(match[1]);
+                  matchingSrc = src;
+                }
+              }
+              if (codes.size === 1) {
+                primaryTypeIcon = matchingSrc;
+                break;
+              }
+            }
+
             return {
                 text: main.innerText || '',
-                heads: [...main.querySelectorAll('h1,h2,h3,h4')].map(x => (x.innerText||'').trim()).filter(Boolean),
+                heads: headings.map(x => (x.innerText||'').trim()).filter(Boolean),
                 imgs: [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || ''),
-                alts: [...main.querySelectorAll('img')].map(x => x.getAttribute('alt') || '')
+                primary_type_icon: primaryTypeIcon
             };
         }"""
     )
@@ -167,21 +212,9 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
     main_heading = next((x for x in heads if re.search(r"\s+-\s+Card Details$", x, re.I)), "")
     name = re.sub(r"\s+-\s+Card Details$", "", main_heading, flags=re.I)
 
-        # includi anche gli alt delle immagini
-    img_text = " ".join(
-        f"{src} {alt}" for src, alt in zip(data["imgs"], data.get("alts", []))
-    )
+    img_text = " ".join(data["imgs"])
     rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
-        # 1) type direttamente dall'alt o dal src (es. "AGL", "TEQ", ...)
-    type_match = re.search(r"\b(AGL|TEQ|INT|STR|PHY)\b", img_text, re.I)
-    if type_match:
-        type_code = None
-        type_name = type_match.group(1).upper()
-    else:
-        # 2) fallback: vecchia regex con codice numerico
-        type_match = re.search(r"type[_-]icon[_-]?(1[0-4])", img_text, re.I)
-        type_code = type_match.group(1) if type_match else None
-        type_name = TYPE_BY_CODE.get(type_code, "") if type_code else ""
+    detail_type = type_from_images([data.get("primary_type_icon", "")])
     card_text = " ".join([name, *heads, *lines[-55:], img_text])
     awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
     date = next((line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)), "")
@@ -189,7 +222,7 @@ def card_detail(page, href: str, region: str) -> dict[str, str]:
     return {
         "name": name,
         "rarity": rarity.group(1).upper() if rarity else "",
-        "type": type_name,
+        "type": detail_type or fallback_type,
         "awakening": awakening,
         "date": date
     }
@@ -558,7 +591,7 @@ def main() -> int:
                             if added:
                                 lines = []
                                 for card in added:
-                                    detail = card_detail(page, card["url"], region)
+                                    detail = card_detail(page, card["url"], region, fallback_type=card.get("type", ""))
                                     name = detail["name"] or card["name"] or f"Card {card['id']}"
                                     attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
                                     prefix = f"{detail['awakening']} " if detail["awakening"] else ""
