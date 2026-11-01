@@ -678,7 +678,7 @@ def notify(title: str, lines: list[str], chat_preferences: list[dict], preferenc
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
     # TEST: controlla tutte le categorie evento, incluse le Challenge, per GLB e JP ogni 5 minuti.
     # Le Quest vengono controllate tramite inspect_quests(), senza rileggere la categoria /events?category=0.
-    return set(), False, False, {"GLB", "JP"}, {"GLB", "JP"}, False
+    return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
 """
     if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
