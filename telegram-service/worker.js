@@ -82,7 +82,7 @@ async function getChat(env, chatId) {
 
 function menuText(row) {
   const enabled = PREFS.filter((p) => Number(row?.[p.key]) === 1).length;
-  return `⚙️ <b>Preferenze DokkanDB</b>\n\nSeleziona gli aggiornamenti che vuoi ricevere.\nLe modifiche vengono salvate immediatamente.\n\nAttive: <b>${enabled}/8</b>`;
+  return `⚙️ <b>Preferenze DokkanDB</b>\n\nSeleziona gli aggiornamenti che vuoi ricevere.\n\nAttive: <b>${enabled}/8</b>`;
 }
 
 function menuKeyboard(row) {
