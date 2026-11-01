@@ -763,9 +763,9 @@ def notify(title: str, lines: list[str], chat_preferences: list[dict], preferenc
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
     # TEST: controlla tutte le sezioni DokkanDB ogni 5 minuti, sia GLB che JP.
     # Le Quest vengono controllate tramite inspect_quests(); full_event_scan attiva tutte le categorie evento.
-    return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
+    """return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True"""
 
-    """if "--full" in sys.argv:
+    if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
 
     ora = now.hour
@@ -810,7 +810,7 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
         event_scan_regions.add("JP")
 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
-"""
+
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
