@@ -670,7 +670,7 @@ def main() -> int:
     now = datetime.now(ROME)
     card_regions, news_due, summons_due, challenge_regions, event_scan_regions, full_event_scan = get_scheduled_tasks(now)
     
-    if not any([card_regions, news_due, challenge_regions, event_scan_regions]):
+    if not any([card_regions, news_due, summons_due, challenge_regions, event_scan_regions]):
         print(f"Orario {now.strftime('%H:%M')} - Nessun controllo previsto in questo slot di 5 minuti.")
         return 0
 
