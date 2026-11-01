@@ -8,8 +8,16 @@ binding = "DB"
 database_name = "dokkandb-telegram"
 database_id = "f8da1a26-b385-4ce4-b6ac-fffe0139329f"
 
-[observability]
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
 enabled = false
+head_sampling_rate = 1
+persist = true
 
 [secrets]
 required = [
