@@ -840,8 +840,6 @@ def print_run_summary(
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
     """Schedule selettiva DokkanDB (orari locali Europe/Rome)."""
-    """ test 5 min """
-    """return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True"""
     if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
 
@@ -858,8 +856,9 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
     summons_due = minuto == 0
 
     # PERSONAGGI: ogni 5 minuti durante le finestre dedicate.
-    jp_window = (ora == 2 and minuto >= 30) or (ora == 3 and minuto <= 30)
-    glb_window = (ora == 6 and minuto >= 30) or (ora == 7 and minuto <= 30)
+    # JP: 03:00-03:30; GLB: 07:00-07:30.
+    jp_window = ora == 3 and minuto <= 30
+    glb_window = ora == 7 and minuto <= 30
     if jp_window:
         card_regions.add("JP")
     if glb_window:
