@@ -1,0 +1,9 @@
+name = "dokkandb-telegram-service"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dokkandb-telegram"
+database_id = "f8da1a26-b385-4ce4-b6ac-fffe0139329f"
