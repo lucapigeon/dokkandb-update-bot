@@ -789,6 +789,8 @@ def print_run_summary(
     alerts: list[tuple[str, str, list[str]]],
     delivery: dict[str, object],
     errors: list[str],
+    cache_hits: dict[str, int] | None = None,
+    network_mode: str | None = None,
 ) -> None:
     """Print a compact, human-readable summary of this monitor execution."""
     preference_labels = {
@@ -829,11 +831,23 @@ def print_run_summary(
         f"{delivery.get('filtered_chat_alerts', 0)} combinazioni chat/categoria escluse dalle preferenze; "
         f"{delivery.get('messages_failed', 0)} invii falliti."
     )
+    if network_mode == "route-fallback":
+        request_label = "Richieste HTTP DokkanDB intercettate (fallback Playwright; cache disabilitata)"
+    else:
+        request_label = "Richieste HTTP DokkanDB conteggiate sulla rete (cache esclusa)"
     print(
-        "Richieste HTTP DokkanDB (immagini/video/font esclusi): "
+        request_label + " (immagini/video/font esclusi): "
         + ", ".join(f"{region}={request_counts.get(region, 0)}" for region in ("GLB", "JP"))
         + f" (totale {sum(request_counts.values())})"
     )
+    if cache_hits is not None and network_mode != "route-fallback":
+        print(
+            "Risorse DokkanDB riutilizzate dalla cache: "
+            + ", ".join(f"{region}={cache_hits.get(region, 0)}" for region in ("GLB", "JP"))
+            + f" (totale {sum(cache_hits.values())})"
+        )
+    if network_mode:
+        print(f"Modalità rete Chromium: {network_mode}")
     if errors:
         print("Errori durante i controlli: " + " | ".join(errors))
     print("================================================\n")
@@ -890,6 +904,190 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
 
+
+def install_browser_network_controls(
+    page,
+    context,
+    active_region: dict[str, str | None],
+    request_counts: dict[str, int],
+    cache_hits: dict[str, int],
+) -> str:
+    """Block images/media/fonts through CDP while keeping Chromium's HTTP cache on.
+
+    If the CDP setup is unavailable, fall back to the original Playwright route.
+    """
+    cdp = None
+    try:
+        cdp = context.new_cdp_session(page)
+        cdp.send("Network.enable")
+
+        request_info: dict[str, tuple[str, str]] = {}
+        cached_request_ids: set[str] = set()
+        completed_request_ids: dict[str, tuple[str, bool]] = {}
+
+        def on_request_paused(params: dict) -> None:
+            """Fail only image, media and font requests paused by Fetch.enable."""
+            request_id = str(params.get("requestId", ""))
+            if not request_id:
+                return
+            try:
+                cdp.send(
+                    "Fetch.failRequest",
+                    {"requestId": request_id, "errorReason": "BlockedByClient"},
+                )
+            except Exception as exc:
+                # Fail open rather than leaving a request paused and hanging
+                # page navigation. This affects only a blocked heavy resource.
+                print(
+                    f"Avviso: impossibile bloccare una risorsa ({type(exc).__name__}: {exc}); "
+                    "la richiesta verrà proseguita.",
+                    file=sys.stderr,
+                )
+                try:
+                    cdp.send("Fetch.continueRequest", {"requestId": request_id})
+                except Exception as continue_exc:
+                    print(
+                        f"Errore nel proseguire la richiesta intercettata: {continue_exc}",
+                        file=sys.stderr,
+                    )
+
+        def on_request_will_be_sent(params: dict) -> None:
+            request_id = str(params.get("requestId", ""))
+            request = params.get("request", {})
+            request_url = str(request.get("url", ""))
+            resource_type = str(params.get("type", "Other")).lower()
+            host = (urlparse(request_url).hostname or "").lower()
+            same_site = host == "dokkandb.com" or host.endswith(".dokkandb.com")
+            region = active_region.get("value")
+            if (
+                request_id
+                and same_site
+                and region in request_counts
+                and resource_type not in {"image", "media", "font"}
+            ):
+                request_info[request_id] = (region, resource_type)
+                completed_request_ids.pop(request_id, None)
+
+        def on_request_served_from_cache(params: dict) -> None:
+            request_id = str(params.get("requestId", ""))
+            if request_id in cached_request_ids:
+                return
+            info = request_info.get(request_id)
+            if info:
+                cached_request_ids.add(request_id)
+                cache_hits[info[0]] += 1
+                return
+            # Defensive handling in case Chromium reports the cache event after
+            # responseReceived for this request.
+            completed = completed_request_ids.get(request_id)
+            if completed and completed[1]:
+                region = completed[0]
+                request_counts[region] = max(0, request_counts[region] - 1)
+                cache_hits[region] += 1
+                completed_request_ids[request_id] = (region, False)
+                cached_request_ids.add(request_id)
+
+        def on_response_received(params: dict) -> None:
+            request_id = str(params.get("requestId", ""))
+            info = request_info.pop(request_id, None)
+            if not info:
+                return
+            region, _resource_type = info
+            response = params.get("response", {})
+            served_from_cache = (
+                request_id in cached_request_ids
+                or bool(response.get("fromDiskCache"))
+                or bool(response.get("fromServiceWorker"))
+                or bool(response.get("fromPrefetchCache"))
+            )
+            if served_from_cache:
+                if request_id not in cached_request_ids:
+                    cache_hits[region] += 1
+                    cached_request_ids.add(request_id)
+                completed_request_ids[request_id] = (region, False)
+            else:
+                request_counts[region] += 1
+                completed_request_ids[request_id] = (region, True)
+
+        def on_loading_failed(params: dict) -> None:
+            request_id = str(params.get("requestId", ""))
+            info = request_info.pop(request_id, None)
+            if not info:
+                return
+            # Count failed first-party requests unless Chromium itself blocked
+            # the URL or it was served from cache.
+            if params.get("blockedReason") or request_id in cached_request_ids:
+                return
+            region, _resource_type = info
+            request_counts[region] += 1
+            completed_request_ids[request_id] = (region, True)
+
+        # Register the pause handler before enabling Fetch so no intercepted
+        # image/media/font request can remain paused without a listener.
+        cdp.on("Fetch.requestPaused", on_request_paused)
+
+        # Match resource type, not file extension: this preserves the previous
+        # behavior even for image/media/font URLs without a recognizable suffix.
+        cdp.send(
+            "Fetch.enable",
+            {
+                "patterns": [
+                    {"urlPattern": "*", "resourceType": resource_type, "requestStage": "Request"}
+                    for resource_type in ("Image", "Media", "Font")
+                ]
+            },
+        )
+        # Playwright's high-level route API disables HTTP cache. We use CDP
+        # directly and explicitly leave Chromium's cache enabled instead.
+        try:
+            cdp.send("Network.setCacheDisabled", {"cacheDisabled": False})
+            cache_status = "cache HTTP esplicitamente abilitata"
+        except Exception as cache_exc:
+            # Resource blocking still works; do not risk falling back to a
+            # second interception layer after Fetch.enable has succeeded.
+            cache_status = f"cache HTTP non verificabile ({type(cache_exc).__name__})"
+            print(f"Avviso: {cache_status}.", file=sys.stderr)
+
+        # Attach counters only after CDP setup has succeeded. If setup falls
+        # back to Playwright routing, this avoids double-counting requests.
+        cdp.on("Network.requestWillBeSent", on_request_will_be_sent)
+        cdp.on("Network.requestServedFromCache", on_request_served_from_cache)
+        cdp.on("Network.responseReceived", on_response_received)
+        cdp.on("Network.loadingFailed", on_loading_failed)
+
+        print(
+            "Ottimizzazione rete Chromium: CDP Fetch attivo; "
+            f"{cache_status}; immagini, media e font bloccati per tipo di risorsa."
+        )
+        return "cdp"
+
+    except Exception as exc:
+        if cdp is not None:
+            try:
+                cdp.send("Fetch.disable")
+            except Exception:
+                pass
+        print(
+            f"Avviso: configurazione CDP non riuscita ({type(exc).__name__}: {exc}); "
+            "uso il blocco Playwright tradizionale. In questa modalità la cache HTTP è disabilitata.",
+            file=sys.stderr,
+        )
+
+        def trim_requests(route) -> None:
+            request = route.request
+            host = (urlparse(request.url).hostname or "").lower()
+            same_site = host == "dokkandb.com" or host.endswith(".dokkandb.com")
+            blocked_type = request.resource_type in {"image", "media", "font"}
+            if not blocked_type and same_site and active_region.get("value") in request_counts:
+                request_counts[active_region["value"]] += 1
+            if blocked_type:
+                route.abort()
+            else:
+                route.continue_()
+
+        page.route("**/*", trim_requests)
+        return "route-fallback"
+
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
         test_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
@@ -941,6 +1139,7 @@ def main() -> int:
     errors: list[str] = []
     active_region = {"value": None}
     request_counts = {"GLB": 0, "JP": 0}
+    cache_hits = {"GLB": 0, "JP": 0}
     checked_sections: dict[str, list[str]] = {"GLB": [], "JP": []}
     category_by_key = {key: (key, label, path) for key, label, path in EVENT_CATEGORIES}
 
@@ -954,17 +1153,13 @@ def main() -> int:
         page = context.new_page()
         page.set_default_timeout(30_000)
 
-        def trim_requests(route):
-            request = route.request
-            host = (urlparse(request.url).hostname or "").lower()
-            same_site = host == "dokkandb.com" or host.endswith(".dokkandb.com")
-            blocked_type = request.resource_type in {"image", "media", "font"}
-            if not blocked_type and same_site and active_region["value"]:
-                request_counts[active_region["value"]] += 1
-            if blocked_type: route.abort()
-            else: route.continue_()
-
-        page.route("**/*", trim_requests)
+        network_mode = install_browser_network_controls(
+            page,
+            context,
+            active_region,
+            request_counts,
+            cache_hits,
+        )
         try:
             for region in ("GLB", "JP"):
                 active_region["value"] = region
@@ -1110,7 +1305,9 @@ def main() -> int:
             delivery["filtered_chat_alerts"] = int(delivery["filtered_chat_alerts"]) + int(result["filtered_chat_alerts"])
             delivery["recipients_reached"].update(result["recipients_reached"])
 
-    print_run_summary(now, checked_sections, request_counts, alerts, delivery, errors)
+    print_run_summary(
+        now, checked_sections, request_counts, alerts, delivery, errors, cache_hits, network_mode
+    )
     STATE_PATH.write_text(json.dumps(next_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 1 if errors else 0
 
