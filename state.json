@@ -145,11 +145,11 @@
     ]
   },
   "GLB|events|story": [
+    "/events/story/1215",
+    "/events/story/378",
     "/events/story/1204",
-    "/events/story/1204",
-    "/events/story/1204",
-    "/events/story/1204",
-    "/events/story/1204",
+    "/events/story/284",
+    "/events/story/264",
     "/events/story/239",
     "/events/story/224",
     "/events/story/211",
@@ -164,7 +164,7 @@
     "/events/story/1312",
     "/events/story/1311",
     "/events/story/1313",
-    "/events/story/1204",
+    "/events/story/1309",
     "/events/story/1314",
     "/events/story/273",
     "/events/story/357",
@@ -239,10 +239,10 @@
   ],
   "GLB|events|bonus": [
     "/events/bonus/1228",
-    "/events/bonus/1228",
-    "/events/bonus/1228",
-    "/events/bonus/1228",
-    "/events/bonus/1228",
+    "/events/bonus/1208",
+    "/events/bonus/1218",
+    "/events/bonus/223",
+    "/events/bonus/1211",
     "/events/bonus/1202",
     "/events/bonus/267",
     "/events/bonus/293",
@@ -256,11 +256,11 @@
     "/events/growth/737",
     "/events/growth/1524",
     "/events/growth/320",
-    "/events/growth/1524",
-    "/events/growth/1524",
-    "/events/growth/1524",
+    "/events/growth/319",
+    "/events/growth/726",
+    "/events/growth/503",
     "/events/growth/576",
-    "/events/growth/1524",
+    "/events/growth/507",
     "/events/growth/613",
     "/events/growth/615",
     "/events/growth/616",
@@ -437,24 +437,24 @@
     "/events/growth/405"
   ],
   "GLB|events|limited": [
-    "/events/limited/1737"
+    "/events/limited/805"
   ],
   "GLB|events|challenge": [
     "/events/challenge/1737",
-    "/events/challenge/1737",
-    "/events/challenge/1737",
-    "/events/challenge/1737",
-    "/events/challenge/1737",
+    "/events/challenge/1751",
+    "/events/challenge/1728",
+    "/events/challenge/1778",
+    "/events/challenge/1782",
     "/events/challenge/1775",
-    "/events/challenge/1204",
+    "/events/challenge/1723",
     "/events/challenge/713",
-    "/events/challenge/1204",
+    "/events/challenge/1768",
     "/events/challenge/1769",
-    "/events/challenge/1204",
-    "/events/challenge/1204",
+    "/events/challenge/1766",
+    "/events/challenge/1765",
     "/events/challenge/1762",
-    "/events/challenge/1120461",
-    "/events/challenge/1204",
+    "/events/challenge/1761",
+    "/events/challenge/1752",
     "/events/challenge/1746",
     "/events/challenge/1745",
     "/events/challenge/1743",
@@ -493,9 +493,9 @@
   "GLB|events|z_battle": [
     "/events/zbattle/75",
     "/events/zbattle/74",
-    "/events/zbattle/75",
-    "/events/zbattle/75",
-    "/events/zbattle/75",
+    "/events/zbattle/32",
+    "/events/zbattle/25",
+    "/events/zbattle/136",
     "/events/zbattle/11",
     "/events/zbattle/209",
     "/events/zbattle/55",
@@ -704,23 +704,23 @@
   "GLB|events|db_saga": [],
   "GLB|events|db_z": [
     "/events/dbstory/934",
-    "/events/dbstory/934",
+    "/events/dbstory/929",
     "/events/dbstory/928",
-    "/events/dbstory/934",
+    "/events/dbstory/924",
     "/events/dbstory/916",
     "/events/dbstory/908",
     "/events/dbstory/905",
     "/events/dbstory/901"
   ],
   "GLB|events|db_gt": [
-    "/events/dbstory/934",
-    "/events/dbstory/934",
+    "/events/dbstory/923",
+    "/events/dbstory/912",
     "/events/dbstory/902"
   ],
   "GLB|events|db_movies": [
-    "/events/dbstory/934",
-    "/events/dbstory/934",
-    "/events/dbstory/934",
+    "/events/dbstory/933",
+    "/events/dbstory/931",
+    "/events/dbstory/922",
     "/events/dbstory/921",
     "/events/dbstory/918",
     "/events/dbstory/914",
@@ -731,7 +731,7 @@
     "/events/dbstory/903"
   ],
   "GLB|events|battlefield": [
-    "/events/battlefield/934"
+    "/events/battlefield/106"
   ],
   "JP|cards": [
     "1034861",
@@ -868,12 +868,12 @@
     ]
   },
   "JP|events|story": [
-    "/events/story/934",
-    "/events/story/934",
-    "/events/story/934",
-    "/events/story/934",
-    "/events/story/934",
-    "/events/story/934",
+    "/events/story/1215",
+    "/events/story/378",
+    "/events/story/1204",
+    "/events/story/284",
+    "/events/story/264",
+    "/events/story/239",
     "/events/story/224",
     "/events/story/211",
     "/events/story/188",
@@ -963,9 +963,9 @@
   ],
   "JP|events|bonus": [
     "/events/bonus/1228",
-    "/events/bonus/934",
+    "/events/bonus/1208",
     "/events/bonus/1218",
-    "/events/bonus/934",
+    "/events/bonus/223",
     "/events/bonus/1211",
     "/events/bonus/1202",
     "/events/bonus/267",
@@ -982,8 +982,8 @@
     "/events/growth/320",
     "/events/growth/319",
     "/events/growth/726",
-    "/events/growth/934",
-    "/events/growth/934",
+    "/events/growth/503",
+    "/events/growth/576",
     "/events/growth/507",
     "/events/growth/614",
     "/events/growth/617",
@@ -1162,12 +1162,12 @@
     "/events/growth/401"
   ],
   "JP|events|limited": [
-    "/events/limited/934"
+    "/events/limited/805"
   ],
   "JP|events|challenge": [
     "/events/challenge/1737",
-    "/events/challenge/934",
-    "/events/challenge/934",
+    "/events/challenge/1751",
+    "/events/challenge/1728",
     "/events/challenge/1778",
     "/events/challenge/1782",
     "/events/challenge/1775",
@@ -1220,9 +1220,9 @@
     "/events/zbattle/74",
     "/events/zbattle/32",
     "/events/zbattle/25",
-    "/events/zbattle/934",
+    "/events/zbattle/136",
     "/events/zbattle/11",
-    "/events/zbattle/934",
+    "/events/zbattle/209",
     "/events/zbattle/55",
     "/events/zbattle/109",
     "/events/zbattle/114",
@@ -1430,8 +1430,8 @@
   "JP|events|db_z": [
     "/events/dbstory/934",
     "/events/dbstory/929",
-    "/events/dbstory/934",
-    "/events/dbstory/934",
+    "/events/dbstory/928",
+    "/events/dbstory/924",
     "/events/dbstory/916",
     "/events/dbstory/908",
     "/events/dbstory/905",
@@ -1439,11 +1439,11 @@
   ],
   "JP|events|db_gt": [
     "/events/dbstory/923",
-    "/events/dbstory/934",
-    "/events/dbstory/934"
+    "/events/dbstory/912",
+    "/events/dbstory/902"
   ],
   "JP|events|db_movies": [
-    "/events/dbstory/934",
+    "/events/dbstory/933",
     "/events/dbstory/931",
     "/events/dbstory/922",
     "/events/dbstory/921",
@@ -1456,6 +1456,6 @@
     "/events/dbstory/903"
   ],
   "JP|events|battlefield": [
-    "/events/battlefield/934"
+    "/events/battlefield/106"
   ]
 }
