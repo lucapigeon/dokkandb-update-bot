@@ -628,7 +628,7 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
     # CONTROLLA SOLO I PERSONAGGI AD OGNI RUN test 5 min
-    return set(), False, False, set(), set(), True   
+    return set(), False, False, {"GLB", "JP"}, {"GLB", "JP"}, False 
     
     """if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
