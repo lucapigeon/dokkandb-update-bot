@@ -1457,5 +1457,6 @@
   ],
   "JP|events|battlefield": [
     "/events/battlefield/106"
-  ]
+  ],
+  "telegram_preferences_migrated": true
 }
