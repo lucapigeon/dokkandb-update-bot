@@ -10,3 +10,10 @@ database_id = "f8da1a26-b385-4ce4-b6ac-fffe0139329f"
 
 [observability]
 enabled = false
+
+[secrets]
+required = [
+  "MONITOR_API_SECRET",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_WEBHOOK_SECRET"
+]
