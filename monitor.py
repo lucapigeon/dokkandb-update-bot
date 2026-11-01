@@ -46,16 +46,16 @@ def plain(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
+def clean_listing_title(value: str) -> str:
+    """Remove DokkanDB's broken-image placeholder from event/summon titles."""
+    title = plain(value)
+    title = re.sub(r"\[?\s*IMAGE\s+UNAVAILABLE\s*\]?", " ", title, flags=re.IGNORECASE)
+    return plain(title).strip(" \t-:：|—–")
+
+
 def clean_summon_title(value: str) -> str:
-    """Remove DokkanDB's broken-image placeholder while preserving the summon title."""
-    title = plain(value).split("\n")[0]
-    title = re.sub(
-        r"^\s*\[?\s*IMAGE\s+UNAVAILABLE\s*\]?\s*[:：–—-]?\s*",
-        "",
-        title,
-        flags=re.IGNORECASE,
-    )
-    return plain(title)
+    """Backward-compatible title cleaner for summon listings."""
+    return clean_listing_title(value)
 
 
 def type_from_images(images: list[str]) -> str:
@@ -138,8 +138,9 @@ def type_from_color_candidates(candidates: list[dict]) -> str:
         return ""
     return ranked[0][0]
 
-def switch_region(page, path: str, region: str) -> None:
-    page.goto(urljoin(BASE, path), wait_until="domcontentloaded", timeout=60_000)
+def switch_region(page, path: str, region: str):
+    """Open a DokkanDB page, select GLB/JP if needed, and return the response."""
+    response = page.goto(urljoin(BASE, path), wait_until="domcontentloaded", timeout=60_000)
     try:
         jp_selector = page.get_by_role("checkbox", name="JP", exact=True)
         jp_selector.wait_for(state="attached", timeout=8_000)
@@ -152,6 +153,7 @@ def switch_region(page, path: str, region: str) -> None:
         selector.wait_for(state="visible", timeout=15_000)
         selector.click()
         page.wait_for_timeout(1_200)
+    return response
 
 def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[dict[str, str]]:
     switch_region(page, "/cards", region)
@@ -447,23 +449,24 @@ def extract_events(page, region: str, path: str) -> list[dict[str, str]]:
           const href=a.getAttribute('href');
           if(!href || !/^\\/events\\/[^/?]+\\/\\d+(?:\\?.*)?$/.test(href) || seen.has(href)) continue;
           seen.add(href); const root=a.closest('article')||a.parentElement?.parentElement||a;
-          out.push({href,title:(a.innerText||a.getAttribute('aria-label')||'').trim(),text:(root?.innerText||'').trim().slice(0,300)});
+          const heading=a.querySelector('h1,h2,h3,h4');
+          out.push({href,title:(heading?.innerText||a.innerText||a.getAttribute('aria-label')||'').trim(),text:(root?.innerText||'').trim().slice(0,300)});
         } return out; }"""
     )
     result = []
     for e in entries:
-        title = plain(e["title"]).split("\n")[0]
+        title = clean_listing_title(e["title"])
         if not title:
-            title = plain(e["text"]).split(" ")[0]
+            title = clean_listing_title(e["text"].split(" ")[0])
         result.append({"id": e["href"], "url": urljoin(BASE, e["href"]), "title": title})
     return result
 
 def quest_area(page, region: str, area_number: int) -> dict[str, object] | None:
     try:
-        response = page.goto(urljoin(BASE, f"/events/quests/{area_number}"), wait_until="domcontentloaded", timeout=30_000)
+        # switch_region already navigates to this URL: avoid the previous duplicate page.goto.
+        response = switch_region(page, f"/events/quests/{area_number}", region)
         if response is not None and response.status >= 400:
             return None
-        switch_region(page, f"/events/quests/{area_number}", region)
         stage_ids = page.locator('a[href*="/events/quests/"]').evaluate_all(
             """els => { const ids=new Set(); for(const a of els){
               const m=(a.getAttribute('href')||'').match(/^\\/events\\/quests\\/(\\d+)\\/(\\d+)$/);
@@ -496,23 +499,72 @@ def inspect_quests(page, region: str, previous: dict | None) -> tuple[dict[str, 
     return current, added
 
 def challenge_stages(page, event: dict[str, str], region: str) -> list[dict[str, str]]:
+    """Return only the highest-difficulty Boss Stats link for each challenge stage.
+
+    DokkanDB encodes the stage and difficulty in the child URL. For event 1768,
+    for example, 17680063/64/65 are the three variants of stage 6; the last
+    digit is the difficulty rank, and 5 is Super 3 (the maximum).
+    """
     path = event["url"].replace(BASE, "")
     switch_region(page, path, region)
+    event_match = re.search(r"/events/challenge/(\d+)", path)
+    if not event_match:
+        return []
+    event_id = event_match.group(1)
+
     values = page.locator('a[href*="/events/challenge/"]').evaluate_all(
         """els => { const seen=new Set(), out=[]; for(const a of els){
-          const href=a.getAttribute('href'); if(!href || !/^\\/events\\/challenge\\/\\d+\\/\\d+$/.test(href) || seen.has(href)) continue;
-          seen.add(href); let node=a, best='';
-          for(let i=0;i<5 && node;i++,node=node.parentElement){ const t=(node.innerText||'').trim();
-            if(t.length>best.length && t.length<220 && /BOSS STATS/i.test(t)) best=t;
+          const href=a.getAttribute('href');
+          if(!href || !/^\\/events\\/challenge\\/\\d+\\/\\d+$/.test(href) || seen.has(href)) continue;
+          seen.add(href);
+          let node=a, context='';
+          for(let i=0;i<5 && node;i++,node=node.parentElement){
+            const t=(node.innerText||'').trim();
+            if(t.length>context.length && t.length<300 && /BOSS STATS/i.test(t)) context=t;
           }
-          const lines=(best||'').split('\\n').map(x=>x.trim()).filter(Boolean);
-          const num=lines.find(x=>/^\\d+$/.test(x))||'';
-          const label=lines.find(x=>x!==num && !/BOSS STATS|SUPER[0-9]?|STA|LL RATE|EXP|CLEAR REWARD|FEATURED REWARDS|None/i.test(x))||'';
-          out.push({href,number:num,label});
+          out.push({href,context});
         } return out; }"""
     )
-    return [{"url": urljoin(BASE, s["href"]), "number": s["number"], "label": s["label"]}
-            for s in values]
+
+    by_stage: dict[int, dict[str, str | int]] = {}
+    difficulty_names = {3: "Super 1", 4: "Super 2", 5: "Super 3"}
+    for item in values:
+        child_match = re.search(r"/events/challenge/\d+/(\d+)$", item["href"])
+        if not child_match:
+            continue
+        child_id = child_match.group(1)
+        if not child_id.startswith(event_id):
+            continue
+        suffix = child_id[len(event_id):]
+        if len(suffix) < 2 or not suffix[-1].isdigit():
+            continue
+
+        # The last digit is the difficulty rank; the preceding padded digits
+        # identify the stage (e.g. suffix 0065 -> stage 6, difficulty 5).
+        stage_digits = suffix[:-1].lstrip("0")
+        if not stage_digits.isdigit():
+            continue
+        stage_number = int(stage_digits)
+        difficulty_rank = int(suffix[-1])
+        explicit = re.search(r"\bSUPER\s*([1-3])\b", item.get("context", ""), re.I)
+        difficulty_label = (
+            f"Super {explicit.group(1)}" if explicit
+            else difficulty_names.get(difficulty_rank, f"Difficoltà {difficulty_rank}")
+        )
+
+        existing = by_stage.get(stage_number)
+        if existing is None or difficulty_rank > int(existing["difficulty_rank"]):
+            by_stage[stage_number] = {
+                "url": urljoin(BASE, item["href"]),
+                "number": str(stage_number),
+                "label": difficulty_label,
+                "difficulty_rank": difficulty_rank,
+            }
+
+    return [
+        {"url": str(by_stage[stage]["url"]), "number": str(stage), "label": str(by_stage[stage]["label"])}
+        for stage in sorted(by_stage, reverse=True)
+    ]
 
 def esc(text: str) -> str:
     return html.escape(plain(text), quote=True)
@@ -627,7 +679,8 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    # CONTROLLA SOLO I PERSONAGGI AD OGNI RUN test 5 min
+    # TEST 5 min: controlla tutte le categorie evento, incluse le Challenge, per GLB e JP ogni 5 minuti.
+    # Le Quest vengono controllate tramite inspect_quests(), senza rileggere la categoria /events?category=0.
     return set(), False, False, {"GLB", "JP"}, {"GLB", "JP"}, False 
     
     """if "--full" in sys.argv:
@@ -665,6 +718,7 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False"""
 
+
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
         state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
@@ -682,7 +736,7 @@ def main() -> int:
     now = datetime.now(ROME)
     card_regions, news_due, summons_due, challenge_regions, event_scan_regions, full_event_scan = get_scheduled_tasks(now)
     
-    if not any([card_regions, news_due, summons_due, challenge_regions, event_scan_regions]):
+    if not any([card_regions, news_due, summons_due, challenge_regions, event_scan_regions, full_event_scan]):
         print(f"Orario {now.strftime('%H:%M')} - Nessun controllo previsto in questo slot di 5 minuti.")
         return 0
 
@@ -811,10 +865,17 @@ def main() -> int:
                                 alerts.append((f"DokkanDB {region} update: Quest", [f"• {message} — {link(area_label, quest['url'])}"]))
                                 
                     selected_keys: list[str] = []
-                    if full_event_scan: selected_keys = [k for k, _, _ in EVENT_CATEGORIES]
+                    if full_event_scan:
+                        selected_keys = [k for k, _, _ in EVENT_CATEGORIES if k != "quest"]
                     else:
-                        if region in challenge_regions: selected_keys.append("challenge")
-                        if region in event_scan_regions: selected_keys.extend(k for k, _, _ in EVENT_CATEGORIES if k != "challenge")
+                        if region in challenge_regions:
+                            selected_keys.append("challenge")
+                        if region in event_scan_regions:
+                            # Quest is tracked by inspect_quests() above; fetching this category
+                            # would be a redundant page load and its new entries are not notified.
+                            selected_keys.extend(
+                                k for k, _, _ in EVENT_CATEGORIES if k not in {"challenge", "quest"}
+                            )
                     
                     if selected_keys:
                         selected_categories = [category_by_key[k] for k in selected_keys]
@@ -831,7 +892,16 @@ def main() -> int:
                                 lines = [f"• {link(event['title'] or cat_label, event['url'])}"]
                                 if cat_key == "challenge":
                                     stages = challenge_stages(page, event, region)
-                                    lines.extend(f"  {esc(s['number'])} <b>{esc(s['label'] or 'Stage')}</b> — {link('Boss Stats', s['url'])}" for s in stages)
+                                    if stages:
+                                        lines.extend(
+                                            f"  • Stage {esc(s['number'])} — {esc(s['label'])} — {link('Boss Stats', s['url'])}"
+                                            for s in stages
+                                        )
+                                    else:
+                                        print(
+                                            f"Avviso: nessun link Boss Stats riconosciuto per il Challenge Event {event['url']}",
+                                            file=sys.stderr,
+                                        )
                                 alerts.append((f"DokkanDB {region} update: nuovo {cat_label.lower()}", lines))
                 except Exception as exc:
                     errors.append(f"{region}: {type(exc).__name__}: {exc}")
