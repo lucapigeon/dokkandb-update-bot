@@ -679,6 +679,53 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
     # TEST: controlla tutte le categorie evento, incluse le Challenge, per GLB e JP ogni 5 minuti.
     # Le Quest vengono controllate tramite inspect_quests(), senza rileggere la categoria /events?category=0.
     return set(), False, False, {"GLB", "JP"}, {"GLB", "JP"}, False
+"""
+    if "--full" in sys.argv:
+        return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
+
+    ora = now.hour
+    minuto = 5 * round(now.minute / 5)
+
+    if minuto == 60:
+        minuto = 0
+        ora = (ora + 1) % 24
+
+    card_regions, challenge_regions, event_scan_regions = set(), set(), set()
+    news_due, summons_due = False, False
+
+    # NEWS: ogni 30 minuti
+    if minuto in [0, 30]:
+        news_due = True
+
+    # SUMMON: ogni ora
+    if minuto == 0:
+        summons_due = True
+
+    # PERSONAGGI E CHALLENGE JP
+    if (ora == 2 and minuto >= 30) or (ora == 3 and minuto <= 30):
+        card_regions.add("JP")
+        challenge_regions.add("JP")
+
+    # PERSONAGGI E CHALLENGE GLB
+    if (ora == 6 and minuto >= 30) or (ora == 7 and minuto <= 30):
+        card_regions.add("GLB")
+        challenge_regions.add("GLB")
+
+    # PERSONAGGI E CHALLENGE ENTRAMBE LE REGIONI OGNI ORA
+    if minuto == 0:
+        card_regions.update(["GLB", "JP"])
+        challenge_regions.update(["GLB", "JP"])
+
+    # EVENTI COMPLETI GLB
+    if ora in [3, 15] and minuto == 30:
+        event_scan_regions.add("GLB")
+
+    # EVENTI COMPLETI JP
+    if ora in [7, 19] and minuto == 30:
+        event_scan_regions.add("JP")
+
+    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
+"""
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
