@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import colorsys
 import html
 import hashlib
 import json
@@ -38,6 +39,7 @@ EVENT_CATEGORIES = [
 ]
 TYPE_BY_CODE = {"10": "AGL", "11": "TEQ", "12": "INT", "13": "STR", "14": "PHY"}
 TYPE_ICON_RE = re.compile(r"type[_-]icon[_-]?(1[0-4])", re.I)
+TYPE_CODE_RE = re.compile(r"\b(AGL|TEQ|INT|STR|PHY)\b", re.I)
 ROME = ZoneInfo("Europe/Rome")
 
 def plain(text: str) -> str:
@@ -45,7 +47,7 @@ def plain(text: str) -> str:
 
 
 def type_from_images(images: list[str]) -> str:
-    """Return a type only when the supplied card scope identifies one unambiguous type."""
+    """Read the DokkanDB type code from image metadata when it is explicit."""
     codes = {
         match.group(1)
         for image in images
@@ -54,6 +56,75 @@ def type_from_images(images: list[str]) -> str:
     if len(codes) != 1:
         return ""
     return TYPE_BY_CODE.get(next(iter(codes)), "")
+
+
+def type_from_explicit_metadata(values: list[str]) -> str:
+    """Use an explicit AGL/TEQ/INT/STR/PHY token from type-specific DOM metadata."""
+    found = {
+        match.group(1).upper()
+        for value in values
+        if (match := TYPE_CODE_RE.search(value or "")) is not None
+    }
+    return next(iter(found)) if len(found) == 1 else ""
+
+
+def _css_rgb_values(value: str) -> list[tuple[int, int, int, float]]:
+    """Extract RGB(A) and hex colors from computed CSS values."""
+    result: list[tuple[int, int, int, float]] = []
+    for match in re.finditer(
+        r"rgba?\(\s*([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)(?:\s*[,/ ]\s*([\d.]+)%?)?\s*\)",
+        value or "", re.I
+    ):
+        r, g, b = (max(0, min(255, int(float(match.group(i))))) for i in (1, 2, 3))
+        alpha = float(match.group(4)) if match.group(4) else 1.0
+        if alpha > 0.15:
+            result.append((r, g, b, alpha))
+    for match in re.finditer(r"#([0-9a-f]{3}|[0-9a-f]{6})\b", value or "", re.I):
+        raw = match.group(1)
+        if len(raw) == 3:
+            raw = "".join(ch * 2 for ch in raw)
+        result.append(tuple(int(raw[i:i + 2], 16) for i in (0, 2, 4)) + (1.0,))
+    return result
+
+
+def _dokkan_type_from_rgb(rgb: tuple[int, int, int, float]) -> str:
+    red, green, blue, alpha = rgb
+    hue, saturation, brightness = colorsys.rgb_to_hsv(red / 255, green / 255, blue / 255)
+    degrees = hue * 360
+    if alpha <= 0.15 or saturation < 0.30 or brightness < 0.22:
+        return ""
+    if 185 <= degrees <= 250:
+        return "AGL"       # blue
+    if 80 <= degrees <= 175:
+        return "TEQ"       # green
+    if 255 <= degrees <= 325:
+        return "INT"       # purple
+    if degrees <= 15 or degrees >= 345:
+        return "STR"       # red
+    if 30 <= degrees <= 72:
+        return "PHY"       # yellow
+    return ""
+
+
+def type_from_color_candidates(candidates: list[dict]) -> str:
+    """Infer a type from weighted CSS colors; refuse ambiguous color evidence."""
+    scores: dict[str, float] = {}
+    for item in candidates or []:
+        css = str(item.get("css", ""))
+        try:
+            weight = max(0.0, float(item.get("weight", 1.0)))
+        except (TypeError, ValueError):
+            weight = 1.0
+        for rgb in _css_rgb_values(css):
+            inferred = _dokkan_type_from_rgb(rgb)
+            if inferred:
+                scores[inferred] = scores.get(inferred, 0.0) + weight
+    if not scores:
+        return ""
+    ranked = sorted(scores.items(), key=lambda entry: entry[1], reverse=True)
+    if len(ranked) > 1 and ranked[0][1] < ranked[1][1] * 1.25:
+        return ""
+    return ranked[0][0]
 
 def switch_region(page, path: str, region: str) -> None:
     page.goto(urljoin(BASE, path), wait_until="domcontentloaded", timeout=60_000)
@@ -102,8 +173,43 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
                 }
                 typeRoot = typeRoot || a;
                 const typeImgs = [...typeRoot.querySelectorAll('img')].map(i => ({src:i.getAttribute('src')||'', alt:i.alt||''}));
+
+                // Capture explicit type metadata and CSS colors from the card itself.
+                // Prefer the Type asset and its immediate wrappers, not neighboring tiles.
+                const typeMeta = [];
+                const colorCandidates = [];
+                const seenNodes = new Set();
+                const addNodeStyle = (node, weight) => {
+                  if (!node || seenNodes.has(node) || weight <= 0) return;
+                  seenNodes.add(node);
+                  const attrs = [node.getAttribute?.('class')||'', node.id||'', node.getAttribute?.('title')||'',
+                    node.getAttribute?.('aria-label')||''];
+                  for (const attr of attrs) if (attr) typeMeta.push(attr);
+                  const inlineStyle = node.getAttribute?.('style') || '';
+                  if (inlineStyle) colorCandidates.push({css:inlineStyle, weight:weight * 0.8});
+                  const style = getComputedStyle(node);
+                  for (const prop of ['backgroundColor','borderTopColor','borderRightColor','borderBottomColor','borderLeftColor','color','fill','stroke']) {
+                    const css = style[prop];
+                    if (css && css !== 'transparent' && css !== 'rgba(0, 0, 0, 0)')
+                      colorCandidates.push({css, weight: weight * (prop === 'backgroundColor' ? 1 : (['color','fill','stroke'].includes(prop) ? 0.35 : 0.65))});
+                  }
+                  for (const prop of ['backgroundImage','boxShadow']) {
+                    const css = style[prop];
+                    if (css && css !== 'none') colorCandidates.push({css, weight: weight * 0.55});
+                  }
+                };
+                const typeImageNodes = [...typeRoot.querySelectorAll('img')];
+                for (const img of typeImageNodes) {
+                  const meta = [img.getAttribute('src')||'', img.alt||'', img.title||'', img.className||''];
+                  typeMeta.push(...meta);
+                  const isTypeAsset = /type/i.test(meta.join(' '));
+                  let node = img.parentElement;
+                  for (let depth=0; node && depth<4; depth++, node=node.parentElement)
+                    addNodeStyle(node, (isTypeAsset ? 10 : 4) - depth * 1.8);
+                }
+                addNodeStyle(typeRoot, 2.5);
                 out.push({href, name:(a.innerText||a.getAttribute('aria-label')||'').trim(),
-                  tile:(root?.innerText||'').trim().slice(0,500), imgs, typeImgs});
+                  tile:(root?.innerText||'').trim().slice(0,500), imgs, typeImgs, typeMeta, colorCandidates});
               }
               return out;
             }"""
@@ -150,10 +256,15 @@ def extract_cards(page, region: str, known_ids: set[str] | None = None) -> list[
         card_id = re.search(r"/cards/(\d+)", card["href"])[1]
         image_info = " ".join(f"{i['src']} {i['alt']}" for i in card.get("imgs", []))
         rarity_match = re.search(r"(?:rare[_-])?(LR|UR|SSR|SR|R|N)(?:\.png|\b)", image_info, re.I)
-        card_type = type_from_images([
+        type_image_values = [
             f"{image.get('src', '')} {image.get('alt', '')}"
             for image in card.get("typeImgs", [])
-        ])
+        ]
+        card_type = (
+            type_from_images(type_image_values)
+            or type_from_explicit_metadata(card.get("typeMeta", []))
+            or type_from_color_candidates(card.get("colorCandidates", []))
+        )
         tile = plain(card.get("tile", ""))
         name = plain(card.get("name", "")).split("\n")[0]
         date_match = re.search(r"\b\d{1,2}[ /-][A-Za-z]{3,}[^\n]{0,24}\b\d{1,2}:\d{2}\b", tile)
@@ -177,33 +288,65 @@ def card_detail(page, href: str, region: str, fallback_type: str = "") -> dict[s
             const headings = [...main.querySelectorAll('h1,h2,h3,h4')];
             const cardHeading = headings.find(x => /\\s+-\\s+Card Details$/i.test((x.innerText||'').trim()));
             const typePattern = /type[_-]icon[_-]?(1[0-4])/i;
-            let primaryTypeIcon = '';
+            const typeMeta = [];
+            const colorCandidates = [];
+            const seenNodes = new Set();
+            const addNodeStyle = (node, weight) => {
+              if (!node || seenNodes.has(node) || weight <= 0) return;
+              seenNodes.add(node);
+              for (const attr of [node.getAttribute?.('class')||'', node.id||'', node.getAttribute?.('title')||'',
+                                  node.getAttribute?.('aria-label')||'']) {
+                if (attr) typeMeta.push(attr);
+              }
+              const inlineStyle = node.getAttribute?.('style') || '';
+              if (inlineStyle) colorCandidates.push({css:inlineStyle, weight:weight * 0.8});
+              const style = getComputedStyle(node);
+              for (const prop of ['backgroundColor','borderTopColor','borderRightColor','borderBottomColor','borderLeftColor','color','fill','stroke']) {
+                const css = style[prop];
+                if (css && css !== 'transparent' && css !== 'rgba(0, 0, 0, 0)')
+                  colorCandidates.push({css, weight: weight * (prop === 'backgroundColor' ? 1 : (['color','fill','stroke'].includes(prop) ? 0.35 : 0.65))});
+              }
+              for (const prop of ['backgroundImage','boxShadow']) {
+                const css = style[prop];
+                if (css && css !== 'none') colorCandidates.push({css, weight: weight * 0.55});
+              }
+            };
 
-            // Walk outward from this card's own heading. The nearest scope with
-            // one unique Dokkan type belongs to the displayed card header; later
-            // sections (link partners/related cards) are deliberately excluded.
-            for (let node=cardHeading, depth=0; node && depth<10; node=node.parentElement, depth++) {
-              const codes = new Set();
-              let matchingSrc = '';
-              for (const img of node.querySelectorAll('img')) {
-                const src = img.getAttribute('src') || '';
-                const match = src.match(typePattern);
-                if (match) {
-                  codes.add(match[1]);
-                  matchingSrc = src;
-                }
-              }
-              if (codes.size === 1) {
-                primaryTypeIcon = matchingSrc;
-                break;
-              }
+            const leaderHeading = headings.find(x => /^Leader Skill/i.test((x.innerText||'').trim()));
+            const leaderTop = leaderHeading ? leaderHeading.getBoundingClientRect().top + window.scrollY : Infinity;
+            const topImages = [...main.querySelectorAll('img')].filter(img => {
+              const y = img.getBoundingClientRect().top + window.scrollY;
+              return y < leaderTop;
+            });
+            const typeImages = topImages.filter(img => /type/i.test([
+              img.getAttribute('src')||'', img.alt||'', img.title||'', img.className||''
+            ].join(' ')));
+            const relevantImages = typeImages.length ? typeImages : topImages.slice(0, 12);
+            for (const img of relevantImages) {
+              const meta = [img.getAttribute('src')||'', img.alt||'', img.title||'', img.className||''];
+              typeMeta.push(...meta);
+              const isTypeAsset = /type/i.test(meta.join(' '));
+              let node = img.parentElement;
+              for (let depth=0; node && depth<5; depth++, node=node.parentElement)
+                addNodeStyle(node, (isTypeAsset ? 12 : 4) - depth * 1.6);
             }
+            // Also inspect the card heading's own visual container and nearby ancestors.
+            for (let node=cardHeading, depth=0; node && depth<6; node=node.parentElement, depth++)
+              addNodeStyle(node, 5 - depth * 0.7);
 
+            const imgs = [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || '');
+            const explicitTypeImages = topImages.map(img => {
+              const src = img.getAttribute('src') || '';
+              const match = src.match(typePattern);
+              return match ? match[0] : '';
+            }).filter(Boolean);
             return {
                 text: main.innerText || '',
                 heads: headings.map(x => (x.innerText||'').trim()).filter(Boolean),
-                imgs: [...main.querySelectorAll('img')].map(x => x.getAttribute('src') || ''),
-                primary_type_icon: primaryTypeIcon
+                imgs,
+                explicit_type_images: explicitTypeImages,
+                type_meta: typeMeta,
+                color_candidates: colorCandidates
             };
         }"""
     )
@@ -214,7 +357,11 @@ def card_detail(page, href: str, region: str, fallback_type: str = "") -> dict[s
 
     img_text = " ".join(data["imgs"])
     rarity = re.search(r"rare[_-](LR|UR|SSR|SR|R|N)\b", img_text, re.I)
-    detail_type = type_from_images([data.get("primary_type_icon", "")])
+    detail_type = (
+        type_from_images(data.get("explicit_type_images", []))
+        or type_from_explicit_metadata(data.get("type_meta", []))
+        or type_from_color_candidates(data.get("color_candidates", []))
+    )
     card_text = " ".join([name, *heads, *lines[-55:], img_text])
     awakening = "SEZA" if re.search(r"\b(?:SEZA|SUPER EZA)\b", card_text, re.I) else ("EZA" if re.search(r"\bEZA\b", card_text, re.I) else "")
     date = next((line for line in lines if re.search(r"\d{1,2}:\d{2}", line) and re.search(r"\d{4}", line)), "")
@@ -592,6 +739,8 @@ def main() -> int:
                                 lines = []
                                 for card in added:
                                     detail = card_detail(page, card["url"], region, fallback_type=card.get("type", ""))
+                                    if not detail.get("type"):
+                                        print(f"Avviso: type non rilevato per la carta {card['id']} ({card['url']}).", file=sys.stderr)
                                     name = detail["name"] or card["name"] or f"Card {card['id']}"
                                     attributes = " ".join(v for v in (detail["rarity"], detail["type"]) if v)
                                     prefix = f"{detail['awakening']} " if detail["awakening"] else ""
