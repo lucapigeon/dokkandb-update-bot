@@ -7,3 +7,6 @@ workers_dev = true
 binding = "DB"
 database_name = "dokkandb-telegram"
 database_id = "f8da1a26-b385-4ce4-b6ac-fffe0139329f"
+
+[observability]
+enabled = false
