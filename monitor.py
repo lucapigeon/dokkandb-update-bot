@@ -601,66 +601,52 @@ def read_subscribers(state: dict) -> set[str]:
         print(f"Non posso decifrare le chat iscritte: {exc}", file=sys.stderr)
         return set()
 
-def sync_telegram_subscribers(state: dict) -> tuple[set[str], set[str], set[str]]:
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
-    subscribers = read_subscribers(state)
-    configured_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if configured_chat:
-        subscribers.add(configured_chat)
+def load_chat_preferences(state: dict) -> list[dict]:
+    """Load per-chat notification preferences from the Cloudflare Telegram service.
 
-    offset = int(state.get("telegram_update_offset", 0))
+    On the first run, import subscribers from the legacy encrypted state.json list.
+    The import is idempotent, so a failed run can safely retry it.
+    """
+    api_base = os.environ.get("MONITOR_API_URL", "").strip().rstrip("/")
+    api_secret = os.environ.get("MONITOR_API_SECRET", "").strip()
+    if not api_base or not api_secret:
+        raise RuntimeError("MONITOR_API_URL e MONITOR_API_SECRET devono essere configurati nei GitHub Secrets.")
+
+    headers = {"Authorization": f"Bearer {api_secret}"}
+    if not state.get("telegram_preferences_migrated"):
+        legacy_chat_ids = read_subscribers(state)
+        configured_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+        if configured_chat:
+            legacy_chat_ids.add(configured_chat)
+
+        response = requests.post(
+            f"{api_base}/api/import-legacy",
+            json={"chat_ids": sorted(legacy_chat_ids)},
+            headers=headers,
+            timeout=(10, 30),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("ok"):
+            raise RuntimeError(f"Migrazione iscritti Telegram fallita: {payload}")
+        state["telegram_preferences_migrated"] = True
+        print(f"Migrazione preferenze Telegram completata: {payload.get('imported_candidates', 0)} chat legacy importate o già presenti.")
+
     response = requests.get(
-        f"https://api.telegram.org/bot{token}/getUpdates",
-        params={"offset": offset, "timeout": 0, "allowed_updates": json.dumps(["message", "my_chat_member"])},
+        f"{api_base}/api/preferences",
+        headers=headers,
         timeout=(10, 30),
     )
     response.raise_for_status()
     payload = response.json()
-    if not payload.get("ok"):
-        raise RuntimeError(f"Telegram getUpdates ha restituito un errore: {payload}")
+    if not payload.get("ok") or not isinstance(payload.get("chats"), list):
+        raise RuntimeError(f"Risposta non valida dal servizio preferenze Telegram: {payload}")
+    chats = payload["chats"]
+    print(f"Preferenze Telegram caricate: {len(chats)} chat attive.")
+    return chats
 
-    added: set[str] = set()
-    removed: set[str] = set()
-    updates = payload.get("result", [])
-    next_offset = offset
-    for update in updates:
-        next_offset = max(next_offset, int(update.get("update_id", 0)) + 1)
-        message = update.get("message", {})
-        chat = message.get("chat", {})
-        text = message.get("text", "")
-        if chat.get("type") == "private" and re.match(r"^/start(?:@[A-Za-z0-9_]+)?(?:\s|$)", text, re.I):
-            chat_id = str(chat.get("id", ""))
-            if chat_id and chat_id not in subscribers:
-                subscribers.add(chat_id)
-                added.add(chat_id)
-        elif chat.get("type") == "private" and re.match(r"^/stop(?:@[A-Za-z0-9_]+)?(?:\s|$)", text, re.I):
-            chat_id = str(chat.get("id", ""))
-            if chat_id and chat_id in subscribers:
-                subscribers.discard(chat_id)
-                removed.add(chat_id)
-
-        membership = update.get("my_chat_member", {})
-        group = membership.get("chat", {})
-        if group.get("type") in {"group", "supergroup", "private"}:
-            chat_id = str(group.get("id", ""))
-            member = membership.get("new_chat_member", {})
-            status = member.get("status", "")
-            is_member = status in {"member", "administrator", "creator"} or (status == "restricted" and member.get("is_member", False))
-            if chat_id and is_member and chat_id not in subscribers:
-                subscribers.add(chat_id)
-                added.add(chat_id)
-            elif chat_id and not is_member:
-                subscribers.discard(chat_id)
-                added.discard(chat_id)
-                removed.add(chat_id)
-
-    if subscribers != read_subscribers(state):
-        state["telegram_chat_ids_enc"] = subscriber_cipher().encrypt(json.dumps(sorted(subscribers)).encode("utf-8")).decode("ascii")
-    state["telegram_update_offset"] = next_offset
-    print(f"Telegram: {len(updates)} aggiornamenti ricevuti; {len(added)} nuove iscrizioni e {len(removed)} rimozioni.")
-    return subscribers, added, removed
-
-def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
+def notify(title: str, lines: list[str], chat_preferences: list[dict], preference_key: str) -> None:
+    """Send an alert only to active chats that enabled its region/category."""
     chunks: list[str] = []
     current = f"<b>{esc(title)}</b>"
     for line in lines:
@@ -670,7 +656,18 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
         current += "\n" + line
     if current:
         chunks.append(current)
-    for chat_id in sorted(chat_ids):
+
+    recipients = []
+    for chat in chat_preferences:
+        try:
+            active = int(chat.get("active", 1)) == 1
+            enabled = int(chat.get(preference_key, 0)) == 1
+        except (TypeError, ValueError):
+            active, enabled = False, False
+        if active and enabled and chat.get("chat_id") is not None:
+            recipients.append(str(chat["chat_id"]))
+
+    for chat_id in sorted(set(recipients)):
         for chunk in chunks:
             try:
                 telegram_send(chunk, chat_id)
@@ -679,58 +676,17 @@ def notify(title: str, lines: list[str], chat_ids: set[str]) -> None:
                 break
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    # TEST 5 min: controlla tutte le categorie evento, incluse le Challenge, per GLB e JP ogni 5 minuti.
+    # TEST: controlla tutte le categorie evento, incluse le Challenge, per GLB e JP ogni 5 minuti.
     # Le Quest vengono controllate tramite inspect_quests(), senza rileggere la categoria /events?category=0.
-    return set(), False, False, {"GLB", "JP"}, {"GLB", "JP"}, False 
-    
-    """if "--full" in sys.argv:
-        return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
-    ora = now.hour
-    minuto = 5 * round(now.minute / 5)
-    if minuto == 60:
-        minuto = 0
-        ora = (ora + 1) % 24
-
-    card_regions, challenge_regions, event_scan_regions = set(), set(), set()
-    news_due, summons_due = False, False
-
-    if minuto in [0, 30]:
-        news_due = True
-    if minuto == 0:
-        summons_due = True
-
-    if (ora == 2 and minuto >= 30) or (ora == 3 and minuto <= 30):
-        card_regions.add("JP")
-        challenge_regions.add("JP")
-    
-    if (ora == 6 and minuto >= 30) or (ora == 7 and minuto <= 30):
-        card_regions.add("GLB")
-        challenge_regions.add("GLB")
-    
-    if minuto == 0:
-        card_regions.update(["GLB", "JP"])
-        challenge_regions.update(["GLB", "JP"])
-
-    if ora in [3, 15] and minuto == 30:
-        event_scan_regions.add("GLB")
-    if ora in [7, 19] and minuto == 30:
-        event_scan_regions.add("JP")
-
-    return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False"""
-
+    return set(), False, False, {"GLB", "JP"}, {"GLB", "JP"}, False
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
-        state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
-        subscribers, newly_subscribed, newly_unsubscribed = sync_telegram_subscribers(state)
-        for chat_id in sorted(newly_subscribed):
-            try:
-                telegram_send("✅ Iscrizione attiva: riceverai qui gli aggiornamenti DokkanDB.", chat_id)
-            except Exception:
-                pass
-        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        telegram_send("✅ Test DokkanDB Bot: Telegram riceve correttamente i messaggi.")
-        print(f"Test Telegram inviato. Iscritti attivi: {len(subscribers)}.")
+        test_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+        if not test_chat:
+            raise RuntimeError("TELEGRAM_CHAT_ID non configurato: impossibile inviare il messaggio di test.")
+        telegram_send("✅ Test DokkanDB Bot: Telegram riceve correttamente i messaggi.", test_chat)
+        print("Test Telegram inviato.")
         return 0
 
     now = datetime.now(ROME)
@@ -742,24 +698,19 @@ def main() -> int:
 
     state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
     try:
-        chat_ids, newly_subscribed, newly_unsubscribed = sync_telegram_subscribers(state)
+        chat_preferences = load_chat_preferences(state)
     except Exception as exc:
-        print(f"Impossibile aggiornare le iscrizioni Telegram; continuo con quelle salvate: {exc}", file=sys.stderr)
-        chat_ids = read_subscribers(state)
-        configured_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-        if configured_chat:
-            chat_ids.add(configured_chat)
-        newly_subscribed, newly_unsubscribed = set(), set()
-        
-    for chat_id in sorted(newly_subscribed):
-        try: telegram_send("✅ Iscrizione attiva: riceverai qui gli aggiornamenti DokkanDB.", chat_id)
-        except Exception: pass
-    for chat_id in sorted(newly_unsubscribed):
-        try: telegram_send("Iscrizione disattivata. Per riattivarla invia /start.", chat_id)
-        except Exception: pass
+        # Do not continue the scan with stale recipients: otherwise new IDs could be
+        # committed to state.json without their notifications being delivered.
+        print(f"Impossibile caricare le preferenze Telegram: {exc}", file=sys.stderr)
+        return 1
 
-    next_state = {k: v for k, v in state.items() if k in {"telegram_chat_ids_enc", "telegram_update_offset"} or re.match(r"^(?:GLB|JP)\|(?:cards|news|summons|quests|events)", k)}
-    alerts: list[tuple[str, list[str]]] = []
+    next_state = {
+        k: v for k, v in state.items()
+        if k in {"telegram_chat_ids_enc", "telegram_update_offset", "telegram_preferences_migrated"}
+        or re.match(r"^(?:GLB|JP)\|(?:cards|news|summons|quests|events)", k)
+    }
+    alerts: list[tuple[str, str, list[str]]] = []
     errors: list[str] = []
     active_region = {"value": None}
     request_counts = {"GLB": 0, "JP": 0}
@@ -816,7 +767,7 @@ def main() -> int:
                                     
                                     lines.append(f"• {esc(prefix + attributes)} {link(name, card['url'])}{date_part}")
                                 if lines:
-                                    alerts.append((f"DokkanDB {region} update: nuovi personaggi", lines))
+                                    alerts.append((f"cards_{region.lower()}", f"DokkanDB {region} update: nuovi personaggi", lines))
                                     
                     if news_due:
                         news_key = f"{region}|news"
@@ -831,7 +782,7 @@ def main() -> int:
                             fresh = [item for item in news if item["id"] not in old_set]
                             if fresh:
                                 lines = [f"• {esc(i['date']) + ' — ' if i['date'] else ''}<b>{link(i['title'] or 'News', i['url'])}</b>" for i in fresh]
-                                alerts.append((f"DokkanDB {region} update: nuove news", lines))
+                                alerts.append((f"news_{region.lower()}", f"DokkanDB {region} update: nuove news", lines))
 
                     if summons_due:
                         for category, summon_label in ((1, "stone"), (3, "ticket")):
@@ -847,7 +798,7 @@ def main() -> int:
                                 fresh = [item for item in summons if item["id"] not in old_set]
                                 if fresh:
                                     lines = [f"• nuova summon {summon_label}: {esc(i['date']) + ' — ' if i['date'] else ''}<b>{link(i['title'] or 'Banner', i['url'])}</b>" for i in fresh]
-                                    alerts.append((f"DokkanDB {region} update: summon {summon_label}", lines))
+                                    alerts.append((f"summons_{region.lower()}", f"DokkanDB {region} update: summon {summon_label}", lines))
 
                     if region in event_scan_regions or full_event_scan:
                         quest_key = f"{region}|quests"
@@ -862,7 +813,7 @@ def main() -> int:
                                 numbers = ", ".join(str(n) for n in added_stages)
                                 message = f"{stage_word}: Quest, area {quest['area']}, stage {numbers}"
                                 area_label = f"area {quest['area']}"
-                                alerts.append((f"DokkanDB {region} update: Quest", [f"• {message} — {link(area_label, quest['url'])}"]))
+                                alerts.append((f"events_{region.lower()}", f"DokkanDB {region} update: Quest", [f"• {message} — {link(area_label, quest['url'])}"]))
                                 
                     selected_keys: list[str] = []
                     if full_event_scan:
@@ -902,7 +853,7 @@ def main() -> int:
                                             f"Avviso: nessun link Boss Stats riconosciuto per il Challenge Event {event['url']}",
                                             file=sys.stderr,
                                         )
-                                alerts.append((f"DokkanDB {region} update: nuovo {cat_label.lower()}", lines))
+                                alerts.append((f"events_{region.lower()}", f"DokkanDB {region} update: nuovo {cat_label.lower()}", lines))
                 except Exception as exc:
                     errors.append(f"{region}: {type(exc).__name__}: {exc}")
                     print(f"Errore nel controllo {region}: {exc}", file=sys.stderr)
@@ -914,8 +865,8 @@ def main() -> int:
     if alerts:
         months = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre")
         stamp = f"{now.day} {months[now.month - 1]} {now.year}, {now:%H:%M}"
-        for title, lines in alerts:
-            notify(f"{title} · {stamp}", lines, chat_ids)
+        for preference_key, title, lines in alerts:
+            notify(f"{title} · {stamp}", lines, chat_preferences, preference_key)
             
     STATE_PATH.write_text(json.dumps(next_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 1 if errors else 0
