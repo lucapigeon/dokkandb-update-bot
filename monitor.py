@@ -730,8 +730,8 @@ def load_chat_preferences(state: dict) -> list[dict]:
     print(f"Preferenze Telegram caricate: {len(chats)} chat attive.")
     return chats
 
-def notify(title: str, lines: list[str], chat_preferences: list[dict], preference_key: str) -> None:
-    """Send an alert only to active chats that enabled its region/category."""
+def notify(title: str, lines: list[str], chat_preferences: list[dict], preference_key: str) -> dict[str, object]:
+    """Send an alert to enabled chats and return delivery/filter statistics."""
     chunks: list[str] = []
     current = f"<b>{esc(title)}</b>"
     for line in lines:
@@ -742,23 +742,101 @@ def notify(title: str, lines: list[str], chat_preferences: list[dict], preferenc
     if current:
         chunks.append(current)
 
-    recipients = []
+    recipients: set[str] = set()
+    filtered_chat_alerts = 0
     for chat in chat_preferences:
         try:
             active = int(chat.get("active", 1)) == 1
             enabled = int(chat.get(preference_key, 0)) == 1
         except (TypeError, ValueError):
             active, enabled = False, False
-        if active and enabled and chat.get("chat_id") is not None:
-            recipients.append(str(chat["chat_id"]))
+        if not active or chat.get("chat_id") is None:
+            continue
+        if enabled:
+            recipients.add(str(chat["chat_id"]))
+        else:
+            # One filtered chat-alert pair: this chat is active but opted out
+            # of the category/region represented by this alert.
+            filtered_chat_alerts += 1
 
-    for chat_id in sorted(set(recipients)):
+    messages_sent = 0
+    messages_failed = 0
+    recipients_reached: set[str] = set()
+    for chat_id in sorted(recipients):
         for chunk in chunks:
             try:
                 telegram_send(chunk, chat_id)
+                messages_sent += 1
+                recipients_reached.add(chat_id)
             except Exception as exc:
+                messages_failed += 1
                 print(f"Invio Telegram fallito per chat {chat_id}: {exc}", file=sys.stderr)
                 break
+
+    return {
+        "messages_sent": messages_sent,
+        "messages_failed": messages_failed,
+        "recipients_reached": recipients_reached,
+        "filtered_chat_alerts": filtered_chat_alerts,
+        "eligible_recipients": len(recipients),
+    }
+
+
+def print_run_summary(
+    now: datetime,
+    checked_sections: dict[str, list[str]],
+    request_counts: dict[str, int],
+    alerts: list[tuple[str, str, list[str]]],
+    delivery: dict[str, object],
+    errors: list[str],
+) -> None:
+    """Print a compact, human-readable summary of this monitor execution."""
+    preference_labels = {
+        "cards_glb": "Carte GLB", "cards_jp": "Carte JP",
+        "news_glb": "News GLB", "news_jp": "News JP",
+        "summons_glb": "Summon GLB", "summons_jp": "Summon JP",
+        "events_glb": "Eventi GLB", "events_jp": "Eventi JP",
+    }
+
+    print("\n========== RIEPILOGO MONITOR DOKKANDB ==========")
+    print(f"Esecuzione: {now:%d/%m/%Y %H:%M:%S} (Europe/Rome)")
+    for region in ("GLB", "JP"):
+        sections = checked_sections.get(region, [])
+        if sections:
+            print(f"{region}: " + "; ".join(sections))
+        else:
+            print(f"{region}: nessuna sezione controllata")
+
+    if alerts:
+        counts: dict[str, int] = {}
+        for preference_key, _title, _lines in alerts:
+            counts[preference_key] = counts.get(preference_key, 0) + 1
+        detected = ", ".join(
+            f"{preference_labels.get(key, key)}: {count} avvisi"
+            for key, count in sorted(counts.items())
+        )
+        print(f"Nuovi aggiornamenti rilevati: {len(alerts)} avvisi ({detected})")
+    else:
+        print("Nuovi aggiornamenti rilevati: nessuno")
+
+    recipients_reached = delivery.get("recipients_reached", set())
+    if not isinstance(recipients_reached, set):
+        recipients_reached = set()
+    print(
+        "Telegram: "
+        f"{delivery.get('messages_sent', 0)} messaggi inviati con successo; "
+        f"{len(recipients_reached)} chat raggiunte; "
+        f"{delivery.get('filtered_chat_alerts', 0)} combinazioni chat/categoria escluse dalle preferenze; "
+        f"{delivery.get('messages_failed', 0)} invii falliti."
+    )
+    print(
+        "Richieste HTTP DokkanDB (immagini/video/font esclusi): "
+        + ", ".join(f"{region}={request_counts.get(region, 0)}" for region in ("GLB", "JP"))
+        + f" (totale {sum(request_counts.values())})"
+    )
+    if errors:
+        print("Errori durante i controlli: " + " | ".join(errors))
+    print("================================================\n")
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
     # TEST: controlla tutte le sezioni DokkanDB ogni 5 minuti, sia GLB che JP.
@@ -826,6 +904,14 @@ def main() -> int:
     
     if not any([card_regions, news_due, summons_due, challenge_regions, event_scan_regions, full_event_scan]):
         print(f"Orario {now.strftime('%H:%M')} - Nessun controllo previsto in questo slot di 5 minuti.")
+        print_run_summary(
+            now,
+            {"GLB": [], "JP": []},
+            {"GLB": 0, "JP": 0},
+            [],
+            {"messages_sent": 0, "messages_failed": 0, "recipients_reached": set(), "filtered_chat_alerts": 0},
+            [],
+        )
         return 0
 
     state = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
@@ -834,7 +920,16 @@ def main() -> int:
     except Exception as exc:
         # Do not continue the scan with stale recipients: otherwise new IDs could be
         # committed to state.json without their notifications being delivered.
-        print(f"Impossibile caricare le preferenze Telegram: {exc}", file=sys.stderr)
+        error_message = f"Impossibile caricare le preferenze Telegram: {exc}"
+        print(error_message, file=sys.stderr)
+        print_run_summary(
+            now,
+            {"GLB": [], "JP": []},
+            {"GLB": 0, "JP": 0},
+            [],
+            {"messages_sent": 0, "messages_failed": 0, "recipients_reached": set(), "filtered_chat_alerts": 0},
+            [error_message],
+        )
         return 1
 
     next_state = {
@@ -846,6 +941,7 @@ def main() -> int:
     errors: list[str] = []
     active_region = {"value": None}
     request_counts = {"GLB": 0, "JP": 0}
+    checked_sections: dict[str, list[str]] = {"GLB": [], "JP": []}
     category_by_key = {key: (key, label, path) for key, label, path in EVENT_CATEGORIES}
 
     with sync_playwright() as p:
@@ -877,6 +973,7 @@ def main() -> int:
                         card_key = f"{region}|cards"
                         old_cards = state.get(card_key)
                         cards = extract_cards(page, region, set(old_cards) if old_cards else None)
+                        checked_sections[region].append("Carte/personaggi")
                         current_ids = [card["id"] for card in cards]
                         next_state[card_key] = current_ids
                         if old_cards is None:
@@ -904,6 +1001,7 @@ def main() -> int:
                     if news_due:
                         news_key = f"{region}|news"
                         news = extract_news(page, region)
+                        checked_sections[region].append("News")
                         old_news = state.get(news_key)
                         current_news_ids = [item["id"] for item in news]
                         next_state[news_key] = current_news_ids
@@ -920,6 +1018,7 @@ def main() -> int:
                         for category, summon_label in ((1, "stone"), (3, "ticket")):
                             summon_key = f"{region}|summons|{category}"
                             summons = extract_summons(page, region, category)
+                            checked_sections[region].append(f"Summon {summon_label.title()}")
                             old_summons = state.get(summon_key)
                             current_summon_ids = [item["id"] for item in summons]
                             next_state[summon_key] = current_summon_ids
@@ -936,6 +1035,7 @@ def main() -> int:
                         quest_key = f"{region}|quests"
                         previous = state.get(quest_key)
                         quest, added_stages = inspect_quests(page, region, previous)
+                        checked_sections[region].append("Quest")
                         if quest is not None:
                             next_state[quest_key] = {"area": quest["area"], "stages": quest["stages"]}
                             if previous is None:
@@ -965,6 +1065,7 @@ def main() -> int:
                         for cat_key, cat_label, path in selected_categories:
                             key = f"{region}|events|{cat_key}"
                             events = extract_events(page, region, path)
+                            checked_sections[region].append(cat_label)
                             old_ids = set(state.get(key, []))
                             next_state[key] = [event["id"] for event in events]
                             if key not in state:
@@ -993,13 +1094,23 @@ def main() -> int:
             active_region["value"] = None
             browser.close()
 
-    print("Richieste DokkanDB consentite: " + ", ".join(f"{region}={count}" for region, count in request_counts.items()))
+    delivery: dict[str, object] = {
+        "messages_sent": 0,
+        "messages_failed": 0,
+        "recipients_reached": set(),
+        "filtered_chat_alerts": 0,
+    }
     if alerts:
         months = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre")
         stamp = f"{now.day} {months[now.month - 1]} {now.year}, {now:%H:%M}"
         for preference_key, title, lines in alerts:
-            notify(f"{title} · {stamp}", lines, chat_preferences, preference_key)
-            
+            result = notify(f"{title} · {stamp}", lines, chat_preferences, preference_key)
+            delivery["messages_sent"] = int(delivery["messages_sent"]) + int(result["messages_sent"])
+            delivery["messages_failed"] = int(delivery["messages_failed"]) + int(result["messages_failed"])
+            delivery["filtered_chat_alerts"] = int(delivery["filtered_chat_alerts"]) + int(result["filtered_chat_alerts"])
+            delivery["recipients_reached"].update(result["recipients_reached"])
+
+    print_run_summary(now, checked_sections, request_counts, alerts, delivery, errors)
     STATE_PATH.write_text(json.dumps(next_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 1 if errors else 0
 
