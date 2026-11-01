@@ -839,56 +839,57 @@ def print_run_summary(
     print("================================================\n")
 
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
-    # TEST: controlla tutte le sezioni DokkanDB ogni 5 minuti, sia GLB che JP.
-    # Le Quest vengono controllate tramite inspect_quests(); full_event_scan attiva tutte le categorie evento.
+    """Schedule selettiva DokkanDB (orari locali Europe/Rome)."""
+    """ test 5 min """
     """return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True"""
-
     if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
 
     ora = now.hour
     minuto = 5 * round(now.minute / 5)
-
     if minuto == 60:
         minuto = 0
         ora = (ora + 1) % 24
 
-    card_regions, challenge_regions, event_scan_regions = set(), set(), set()
-    news_due, summons_due = False, False
+    card_regions: set[str] = set()
+    challenge_regions: set[str] = set()
+    event_scan_regions: set[str] = set()
+    news_due = minuto in (0, 30)
+    summons_due = minuto == 0
 
-    # NEWS: ogni 30 minuti
-    if minuto in [0, 30]:
-        news_due = True
-
-    # SUMMON: ogni ora
-    if minuto == 0:
-        summons_due = True
-
-    # PERSONAGGI E CHALLENGE JP
-    if (ora == 2 and minuto >= 30) or (ora == 3 and minuto <= 30):
+    # PERSONAGGI: ogni 5 minuti durante le finestre dedicate.
+    jp_window = (ora == 2 and minuto >= 30) or (ora == 3 and minuto <= 30)
+    glb_window = (ora == 6 and minuto >= 30) or (ora == 7 and minuto <= 30)
+    if jp_window:
         card_regions.add("JP")
-        challenge_regions.add("JP")
-
-    # PERSONAGGI E CHALLENGE GLB
-    if (ora == 6 and minuto >= 30) or (ora == 7 and minuto <= 30):
+    if glb_window:
         card_regions.add("GLB")
+
+    # PERSONAGGI: un controllo giornaliero, 12 ore dopo la fine della finestra.
+    if ora == 15 and minuto == 30:
+        card_regions.add("JP")
+    if ora == 19 and minuto == 30:
+        card_regions.add("GLB")
+
+    # CHALLENGE: ogni 10 minuti durante le finestre dedicate.
+    if jp_window and minuto % 10 == 0:
+        challenge_regions.add("JP")
+    if glb_window and minuto % 10 == 0:
         challenge_regions.add("GLB")
 
-    # PERSONAGGI E CHALLENGE ENTRAMBE LE REGIONI OGNI ORA
-    if minuto == 0:
-        card_regions.update(["GLB", "JP"])
-        challenge_regions.update(["GLB", "JP"])
+    # CHALLENGE: un controllo giornaliero, 10 ore dopo la fine della finestra.
+    if ora == 13 and minuto == 30:
+        challenge_regions.add("JP")
+    if ora == 17 and minuto == 30:
+        challenge_regions.add("GLB")
 
-    # EVENTI COMPLETI GLB
-    if ora in [3, 15] and minuto == 30:
+    # ALTRI EVENTI + QUEST (i Challenge sono gestiti separatamente).
+    if (ora, minuto) in {(1, 0), (3, 30)}:
         event_scan_regions.add("GLB")
-
-    # EVENTI COMPLETI JP
-    if ora in [7, 19] and minuto == 30:
+    if (ora, minuto) in {(7, 30), (16, 0)}:
         event_scan_regions.add("JP")
 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
-
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
