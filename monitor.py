@@ -678,8 +678,8 @@ def notify(title: str, lines: list[str], chat_preferences: list[dict], preferenc
 def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], set[str], bool]:
     # TEST: controlla tutte le categorie evento, incluse le Challenge, per GLB e JP ogni 5 minuti.
     # Le Quest vengono controllate tramite inspect_quests(), senza rileggere la categoria /events?category=0.
-    return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
-"""
+    """return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True"""
+
     if "--full" in sys.argv:
         return {"GLB", "JP"}, True, True, {"GLB", "JP"}, {"GLB", "JP"}, True
 
@@ -725,7 +725,6 @@ def get_scheduled_tasks(now: datetime) -> tuple[set[str], bool, bool, set[str], 
         event_scan_regions.add("JP")
 
     return card_regions, news_due, summons_due, challenge_regions, event_scan_regions, False
-"""
 
 def main() -> int:
     if "--test-telegram" in sys.argv[1:]:
