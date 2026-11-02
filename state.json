@@ -975,7 +975,7 @@
     "/events/bonus/267",
     "/events/bonus/293",
     "/events/bonus/253",
-    "/events/bonus/245",
+    "/events/bonus/116",
     "/events/bonus/120",
     "/events/bonus/111",
     "/events/bonus/1222"
@@ -994,6 +994,7 @@
     "/events/growth/1511",
     "/events/growth/725",
     "/events/growth/782",
+    "/events/growth/610",
     "/events/growth/792",
     "/events/growth/789",
     "/events/growth/716",
@@ -1111,7 +1112,9 @@
     "/events/growth/592",
     "/events/growth/546",
     "/events/growth/417",
+    "/events/growth/421",
     "/events/growth/412",
+    "/events/growth/401",
     "/events/growth/403",
     "/events/growth/613",
     "/events/growth/615",
@@ -1217,6 +1220,7 @@
     "/events/challenge/711"
   ],
   "JP|events|z_battle": [
+    "/events/zbattle/215",
     "/events/zbattle/75",
     "/events/zbattle/74",
     "/events/zbattle/32",
