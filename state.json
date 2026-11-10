@@ -2,6 +2,10 @@
   "telegram_chat_ids_enc": "gAAAAABq5iz0iEzw4-vHnRMpw36nn2aMP_WImumgBKxCHqREBM85joarJaq8h0bZ2SCCA7zjwXIhhZhEXnYTP_k7RIezLGvO4fUBMsGR7epB0HFKAEfYzTukr_14jmmMQO6ew15eTeKE",
   "telegram_update_offset": 896954179,
   "GLB|cards": [
+    "1034871",
+    "1034591",
+    "1027601",
+    "1021721",
     "1026611",
     "1034861",
     "1034731",
@@ -11,11 +15,7 @@
     "1032241",
     "1034761",
     "1034741",
-    "1012931",
-    "1012901",
-    "1026431",
-    "1034201",
-    "1034171"
+    "1012931"
   ],
   "GLB|news": [
     "107052",
@@ -438,13 +438,16 @@
     "/events/limited/805"
   ],
   "GLB|events|challenge": [
-    "/events/challenge/1737",
     "/events/challenge/1751",
+    "/events/challenge/1723",
+    "/events/challenge/767",
+    "/events/challenge/1781",
+    "/events/challenge/1784",
+    "/events/challenge/1737",
     "/events/challenge/1728",
     "/events/challenge/1778",
     "/events/challenge/1782",
     "/events/challenge/1775",
-    "/events/challenge/1723",
     "/events/challenge/713",
     "/events/challenge/1768",
     "/events/challenge/1769",
@@ -475,7 +478,6 @@
     "/events/challenge/793",
     "/events/challenge/786",
     "/events/challenge/779",
-    "/events/challenge/767",
     "/events/challenge/768",
     "/events/challenge/762",
     "/events/challenge/761",
@@ -750,12 +752,12 @@
     "1012931"
   ],
   "JP|news": [
+    "301806",
     "301440",
     "301862",
     "301780",
     "301848",
     "301783",
-    "301806",
     "301818",
     "301775",
     "301774",
