@@ -107,9 +107,11 @@
     "101018"
   ],
   "GLB|summons|1": [
+    "12604",
     "12588"
   ],
   "GLB|summons|3": [
+    "12614",
     "12598",
     "12396",
     "12398",
@@ -441,10 +443,10 @@
     "/events/limited/805"
   ],
   "GLB|events|challenge": [
+    "/events/challenge/1781",
     "/events/challenge/1751",
     "/events/challenge/1723",
     "/events/challenge/767",
-    "/events/challenge/1781",
     "/events/challenge/1784",
     "/events/challenge/1737",
     "/events/challenge/1728",
@@ -839,6 +841,7 @@
     "3409"
   ],
   "JP|summons|1": [
+    "2256",
     "2249"
   ],
   "JP|summons|3": [
