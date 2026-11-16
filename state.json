@@ -19,6 +19,8 @@
   ],
   "GLB|news": [
     "107391",
+    "106017",
+    "101966",
     "107390",
     "107384",
     "107544",
@@ -41,7 +43,6 @@
     "107379",
     "107374",
     "107373",
-    "106017",
     "107499",
     "107371",
     "107365",
@@ -78,7 +79,6 @@
     "107118",
     "107107",
     "107081",
-    "101966",
     "107147",
     "107123",
     "106805",
@@ -443,11 +443,11 @@
     "/events/limited/805"
   ],
   "GLB|events|challenge": [
+    "/events/challenge/1784",
     "/events/challenge/1781",
     "/events/challenge/1751",
     "/events/challenge/1723",
     "/events/challenge/767",
-    "/events/challenge/1784",
     "/events/challenge/1737",
     "/events/challenge/1728",
     "/events/challenge/1778",
