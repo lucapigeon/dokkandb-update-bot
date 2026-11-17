@@ -869,7 +869,11 @@
       1,
       2,
       3,
-      4
+      4,
+      5,
+      6,
+      7,
+      8
     ]
   },
   "JP|events|story": [
@@ -966,6 +970,7 @@
     "/events/story/353"
   ],
   "JP|events|bonus": [
+    "/events/bonus/1229",
     "/events/bonus/1228",
     "/events/bonus/223",
     "/events/bonus/1211",
